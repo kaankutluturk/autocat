@@ -18,14 +18,13 @@ for ($i=0; $i -le $referenceBytes.Length-$needle.Length; $i++) {
 }
 $referencePath = Join-Path $referenceDirectory 'mscorlib.dll'
 [IO.File]::WriteAllBytes($referencePath,$referenceBytes)
-& $compilerPath /nologo /noconfig /define:AUTOCAT_GAME /nostdlib+ /target:library "/out:$OutputDirectory\autocat.runtime.100.dll" "/reference:$referencePath" "/reference:$gameManaged\System.dll" "/reference:$gameManaged\System.Core.dll" "/reference:$gameManaged\UnityEngine.CoreModule.dll" (Join-Path $PSScriptRoot 'bridge\Bridge.cs') (Join-Path $PSScriptRoot 'bridge\CosmeticPreview.cs') (Join-Path $PSScriptRoot 'bridge\NativeUnlock.cs') (Join-Path $PSScriptRoot 'bridge\InventoryHandoff.cs') (Join-Path $PSScriptRoot 'bridge\BufferedLog.cs') (Join-Path $PSScriptRoot 'bridge\WorkerDiagnostics.cs') (Join-Path $PSScriptRoot 'shared\Diagnostics.cs')
+& $compilerPath /nologo /noconfig /define:AUTOCAT_GAME /nostdlib+ /target:library "/out:$OutputDirectory\autocat.runtime.101.dll" "/reference:$referencePath" "/reference:$gameManaged\System.dll" "/reference:$gameManaged\System.Core.dll" "/reference:$gameManaged\UnityEngine.CoreModule.dll" (Join-Path $PSScriptRoot 'bridge\Bridge.cs') (Join-Path $PSScriptRoot 'bridge\CosmeticPreview.cs') (Join-Path $PSScriptRoot 'bridge\NativeUnlock.cs') (Join-Path $PSScriptRoot 'bridge\InventoryHandoff.cs') (Join-Path $PSScriptRoot 'bridge\BufferedLog.cs') (Join-Path $PSScriptRoot 'bridge\WorkerDiagnostics.cs') (Join-Path $PSScriptRoot 'shared\Diagnostics.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Runtime component compilation failed.' }
 # Embedded so the download stays one file; Mono still needs a real file on disk, so src/EmbeddedRuntime.cs extracts it at launch.
-& $compilerPath /nologo /target:winexe /win32icon:"$PSScriptRoot\assets\autocat.ico" /platform:x64 /optimize+ /warn:4 "/out:$OutputDirectory\autocat.exe" "/resource:$OutputDirectory\autocat.runtime.100.dll,AutoCat.Runtime.autocat.runtime.100.dll" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll @sourceFiles
+& $compilerPath /nologo /target:winexe /win32icon:"$PSScriptRoot\assets\autocat.ico" /platform:x64 /optimize+ /warn:4 "/out:$OutputDirectory\autocat.exe" "/resource:$OutputDirectory\autocat.runtime.101.dll,AutoCat.Runtime.autocat.runtime.101.dll" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll @sourceFiles
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 Remove-Item -LiteralPath $referencePath
 Remove-Item -LiteralPath $referenceDirectory
-
 
 
 

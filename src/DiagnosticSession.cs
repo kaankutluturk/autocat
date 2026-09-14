@@ -6,6 +6,8 @@ static class DiagnosticSession {
   Diag.Write(LogLevel.Info,"Session","start",Summary());Diag.Write(LogLevel.Info,"Privacy","policy","No raw keys, account IDs, credentials or inventory dumps; paths redacted; settings changes recorded logically.");
   AppDomain.CurrentDomain.UnhandledException+=(s,e)=>{var error=e.ExceptionObject as Exception;if(error!=null)Diag.Fault("Session","fatal",error);Stop();};
  }
- internal static string Summary(){return "AutoCat=1.0.0 runtime=100 build="+Assembly.GetExecutingAssembly().ManifestModule.ModuleVersionId.ToString()+" session="+Diag.Session+" OS="+Environment.OSVersion.VersionString+" OS64="+Environment.Is64BitOperatingSystem+" processBits="+(IntPtr.Size*8)+" pid="+Process.GetCurrentProcess().Id+" level="+Diag.Level+" attach=Mono";}
+ // The control protocol is line-delimited, so encode the selected directory before handing it to the runtime.
+ internal static string Handshake(){return "LOG|"+Diag.Session+"|"+(int)Diag.Level+"|"+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Folder));}
+ internal static string Summary(){return "AutoCat=1.0.1 runtime=101 build="+Assembly.GetExecutingAssembly().ManifestModule.ModuleVersionId.ToString()+" session="+Diag.Session+" OS="+Environment.OSVersion.VersionString+" OS64="+Environment.Is64BitOperatingSystem+" processBits="+(IntPtr.Size*8)+" pid="+Process.GetCurrentProcess().Id+" level="+Diag.Level+" attach=Mono";}
  internal static void Stop(){if(Diag.Current==null)return;Diag.Values(LogLevel.Info,"Session","shutdown","sinkFailures={0} peakQueued={1}",Diag.Current.Failures,Diag.Current.PeakQueued);Diag.Current.Dispose();Diag.Current.WaitForDrain(2000);Diag.Current=null;}
 }
