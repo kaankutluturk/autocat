@@ -1,0 +1,7 @@
+using System;using System.IO;using System.Windows.Forms;using AutoCat.Diagnostics;
+// Runs real menu verification handlers in inspection mode: no hooks, attachment,
+// saved-user-settings mutation, or game input. Test settings stay in the fixture.
+class UiLoggingTest {
+ [STAThread] static void Main(string[] args){string folder=args[0];Directory.CreateDirectory(folder);string id=Guid.NewGuid().ToString("N");Diag.Current=new DiagnosticLog("menu");Diag.Current.Configure(folder,id,LogLevel.Debug);try{Application.EnableVisualStyles();using(var form=new MainForm(true))form.Verify(Path.Combine(folder,"ui-results.txt"));string config=Path.Combine(folder,"settings.xml");var settings=new Settings{Taps=150,EmoteRate=100,ExtremeRates=true};settings.Save(config);var loaded=Settings.Read(config);if(loaded.Taps!=150||!loaded.ExtremeRates)throw new Exception("Saved settings not restored");File.WriteAllText(config,"invalid fixture XML");Settings.Read(config);}finally{Diag.Current.Dispose();if(!Diag.Current.WaitForDrain(3000))throw new Exception("Logger drain timeout");}
+ string text=File.ReadAllText(Path.Combine(folder,"diagnostic-"+id+".log"));foreach(string expected in new[]{"extreme.requested","extreme.confirmed","extreme.cancelled_or_disabled","save.verified","loaded","load.failed.defaults"})if(!text.Contains(expected))throw new Exception("Missing diagnostic "+expected);File.AppendAllText(Path.Combine(folder,"ui-results.txt"),"PASS: actual confirmation handlers logged; settings read-back verified; corrupt fixture explained and defaults restored\n");}
+}
