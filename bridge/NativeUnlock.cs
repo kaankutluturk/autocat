@@ -22,7 +22,7 @@ public sealed class NativeUnlock {
  void Broadcast(){var lobby=lobbyType.GetField("Current",Flags).GetValue(null);if(!(bool)C(lobby,"get_IsValid"))return;foreach(var pair in selected)C(lobby,pair.Key=="hat"?"set_MyHat":"set_MySkin",pair.Value);}
  // CosmeticPreview.Maintain() re-applies the LOCAL visual whenever the game resets it, but has no access to the lobby broadcast -- without this, a remote observer never learns the temporary item survived, only the local client does. Called from CosmeticPreview via the broadcast delegate passed at construction.
  public void BroadcastSlot(string slot,int id){RefreshOwnedSlotBadges(slot);var lobby=lobbyType.GetField("Current",Flags).GetValue(null);if(!(bool)C(lobby,"get_IsValid"))return;C(lobby,slot=="hat"?"set_MyHat":"set_MySkin",id);}
- // The same periodic reset that CosmeticPreview.Maintain() catches for hat/skin (observed recurring on an exact ~120s cadence in live logs) plausibly also wipes temporary wheel entries -- unlike hat/skin, nothing previously re-added a wiped temporary emote. Re-adds any tracked temporary emote whose wheel key has vanished entirely (a value replaced/destroyed in place is left to PruneDeadWheel, not re-created here, since we can't tell that apart from a legitimate removal).
+ // The game periodically resets local state (see CosmeticPreview.Maintain() for hat/skin), which can also wipe temporary wheel entries. Re-adds any tracked temporary emote whose wheel key has vanished entirely; a value replaced/destroyed in place is left to PruneDeadWheel, since that can't be told apart from a legitimate removal.
  void HealWheel(){if(donut==null)return;var wheel=(IDictionary)F(donut,"IDtoEmoteEntry");missingEmotes.Clear();foreach(var pair in emotes)if(!wheel.Contains(pair.Key))missingEmotes.Add(pair.Key);PruneDeadWheel();foreach(int id in missingEmotes){emotes.Remove(id);object row;if(!rowById.TryGetValue(id,out row))continue;var item=F(row,"SteamItem");if(item==null)continue;try{ToggleEmote(item,id,true);log("wheel entry healed id="+id.ToString());}catch(Exception e){log("wheel heal failed id="+id.ToString()+" error="+(e.InnerException??e).Message);}}}
  public void Tick(){
   float tickStart=Time.realtimeSinceStartup;
@@ -31,7 +31,7 @@ public sealed class NativeUnlock {
   if(emotes.Count>0)HealWheel();
   float reconcileMs=(Time.realtimeSinceStartup-tickStart)*1000f;
   bool hide=Blocked();
-  // Bounded like BuildRows/Advance: an unbounded per-row reflection sweep here (previously every row, every Tick) is a per-tick main-thread cost that scales with catalog size and was suspected to cause UI stalls while scrolling. Round-robin a time-boxed slice instead of touching every row every call.
+  // Bounded like BuildRows/Advance: a per-row reflection sweep every Tick costs main-thread time that scales with catalog size, so round-robin a time-boxed slice instead.
   int processed=0;
   if(rows.Count>0){
    if(tickCursor>=rows.Count)tickCursor=0;

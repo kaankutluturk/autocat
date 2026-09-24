@@ -7,14 +7,53 @@ namespace AutoCat
 {
     static class Skin
     {
-        public static readonly Color Background=Color.FromArgb(15,16,19),Panel=Color.FromArgb(22,23,27),Border=Color.FromArgb(58,58,64),Text=Color.FromArgb(202,201,206),Muted=Color.FromArgb(128,126,135),Accent=Color.FromArgb(224,161,137);
-        public static readonly Font Font=new Font("Tahoma",11,FontStyle.Regular,GraphicsUnit.Pixel),Logo=new Font("Consolas",18,FontStyle.Bold,GraphicsUnit.Pixel);
-        public static bool Streamproof=false;
-        
-        public static int D(Graphics g,float value){return (int)Math.Round(value);}
+        public static readonly Color Background=Color.FromArgb(15,16,19),Panel=Color.FromArgb(22,23,27),Border=Color.FromArgb(58,58,64),Text=Color.FromArgb(202,201,206),Muted=Color.FromArgb(128,126,135);
+        public static readonly Color DefaultAccent=Color.FromArgb(224,161,137);
+        public static Color Accent=DefaultAccent;
+        public static Font Font=new Font("Tahoma",11,FontStyle.Regular,GraphicsUnit.Pixel),Logo=new Font("Consolas",18,FontStyle.Bold,GraphicsUnit.Pixel);
+        public static float Scale=1f;
+
+        // Called before any control exists, so text metrics already match the scale Form.Scale applies later.
+        public static void InitializeScale(float scale){Scale=scale;Font=new Font("Tahoma",11*scale,FontStyle.Regular,GraphicsUnit.Pixel);Logo=new Font("Consolas",18*scale,FontStyle.Bold,GraphicsUnit.Pixel);}
+        public static int D(Graphics g,float value){return D(value);}
+        public static int D(float value){return (int)Math.Round(value*Scale);}
         public static void TextAt(Graphics g,string text,Rectangle rect,Color color,TextFormatFlags flags=TextFormatFlags.Left|TextFormatFlags.VerticalCenter)
         {TextRenderer.DrawText(g,text,Font,rect,color,flags|TextFormatFlags.NoPadding|TextFormatFlags.EndEllipsis);}
-        public static void Protect(IntPtr handle){}
+
+        public static string Hex(Color c){return c.R.ToString("X2")+c.G.ToString("X2")+c.B.ToString("X2");}
+        public static bool TryParseHex(string text,out Color color){color=Accent;if(String.IsNullOrEmpty(text))return false;string t=text.Trim().TrimStart('#');if(t.Length!=6)return false;int v;if(!int.TryParse(t,System.Globalization.NumberStyles.HexNumber,System.Globalization.CultureInfo.InvariantCulture,out v))return false;color=Color.FromArgb((v>>16)&255,(v>>8)&255,v&255);return true;}
+        public static Color HsvToRgb(float h,float s,float v){h=((h%360)+360)%360;s=Math.Max(0,Math.Min(1,s));v=Math.Max(0,Math.Min(1,v));float c=v*s,x=c*(1-Math.Abs((h/60f)%2-1)),m=v-c,r,gg,b;
+            if(h<60){r=c;gg=x;b=0;}else if(h<120){r=x;gg=c;b=0;}else if(h<180){r=0;gg=c;b=x;}else if(h<240){r=0;gg=x;b=c;}else if(h<300){r=x;gg=0;b=c;}else{r=c;gg=0;b=x;}
+            return Color.FromArgb(Clamp255((r+m)*255),Clamp255((gg+m)*255),Clamp255((b+m)*255));}
+        static int Clamp255(float v){return Math.Max(0,Math.Min(255,(int)Math.Round(v)));}
+        public static void RgbToHsv(Color c,out float h,out float s,out float v){float r=c.R/255f,g=c.G/255f,b=c.B/255f;float max=Math.Max(r,Math.Max(g,b)),min=Math.Min(r,Math.Min(g,b));v=max;float d=max-min;s=max<=0?0:d/max;
+            if(d<=0.00001f)h=0;else if(max==r)h=60*(((g-b)/d)%6);else if(max==g)h=60*(((b-r)/d)+2);else h=60*(((r-g)/d)+4);if(h<0)h+=360;}
+    }
+    sealed class ColorWheel:Control
+    {
+        public Action<Color> Changed;
+        float hue,sat=1,val=1;Bitmap wheel;int cachedSize=-1;float cachedVal=-1;
+        public ColorWheel(){Width=112;Height=112;TabStop=true;AccessibleRole=AccessibleRole.Graphic;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable,true);}
+        public Color Value{get{return Skin.HsvToRgb(hue,sat,val);}}
+        public void SetColor(Color c){float h,s,v;Skin.RgbToHsv(c,out h,out s,out v);hue=h;sat=s;val=Math.Max(0.05f,v);wheel=null;Invalidate();}
+        void EnsureWheel(){int size=Math.Min(Width,Height);if(wheel!=null&&cachedSize==size&&cachedVal==val)return;var bmp=new Bitmap(size,size);float r=size/2f;
+            for(int y=0;y<size;y++)for(int x=0;x<size;x++){float dx=x+0.5f-r,dy=y+0.5f-r;float dist=(float)Math.Sqrt(dx*dx+dy*dy)/r;
+                if(dist>1){bmp.SetPixel(x,y,Color.Transparent);continue;}
+                float angle=(float)(Math.Atan2(dy,dx)*180/Math.PI);if(angle<0)angle+=360;
+                bmp.SetPixel(x,y,Skin.HsvToRgb(angle,Math.Min(1,dist),val));}
+            wheel=bmp;cachedSize=size;cachedVal=val;}
+        protected override void OnPaint(PaintEventArgs e){EnsureWheel();e.Graphics.DrawImage(wheel,0,0);
+            float r=Math.Min(Width,Height)/2f;float rad=(float)(hue*Math.PI/180);float px=r+r*sat*(float)Math.Cos(rad),py=r+r*sat*(float)Math.Sin(rad);
+            float outer=6*Skin.Scale,inner=5*Skin.Scale;
+            using(var pen=new Pen(Color.Black,3*Skin.Scale))e.Graphics.DrawEllipse(pen,px-outer,py-outer,outer*2,outer*2);
+            using(var pen=new Pen(Color.White,Skin.Scale))e.Graphics.DrawEllipse(pen,px-inner,py-inner,inner*2,inner*2);
+            using(var p=new Pen(Focused?Skin.Accent:Skin.Border))e.Graphics.DrawRectangle(p,0,0,Width-1,Height-1);}
+        void Pick(int x,int y){float r=Math.Min(Width,Height)/2f;float dx=x-r,dy=y-r;float dist=(float)Math.Sqrt(dx*dx+dy*dy)/r;float angle=(float)(Math.Atan2(dy,dx)*180/Math.PI);if(angle<0)angle+=360;hue=angle;sat=Math.Max(0,Math.Min(1,dist));Invalidate();if(Changed!=null)Changed(Value);}
+        protected override void OnMouseDown(MouseEventArgs e){if(e.Button==MouseButtons.Left){Focus();Capture=true;Pick(e.X,e.Y);}base.OnMouseDown(e);}
+        protected override void OnMouseMove(MouseEventArgs e){if(e.Button==MouseButtons.Left)Pick(e.X,e.Y);base.OnMouseMove(e);}
+        protected override void OnMouseUp(MouseEventArgs e){Capture=false;base.OnMouseUp(e);}
+        protected override bool IsInputKey(Keys key){return key==Keys.Left||key==Keys.Right||key==Keys.Up||key==Keys.Down||base.IsInputKey(key);}
+        protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Left)hue-=2;else if(e.KeyCode==Keys.Right)hue+=2;else if(e.KeyCode==Keys.Up)sat=Math.Min(1,sat+0.02f);else if(e.KeyCode==Keys.Down)sat=Math.Max(0,sat-0.02f);else{base.OnKeyDown(e);return;}hue=((hue%360)+360)%360;e.Handled=true;Invalidate();if(Changed!=null)Changed(Value);}
     }
     sealed class FieldGroup:Panel
     {
@@ -71,9 +110,9 @@ namespace AutoCat
         {Text=text;this.min=min;this.max=max;this.step=step;this.format=format;this.suffix=suffix;get=getter;set=setter;Height=36;TabStop=true;AccessibleRole=AccessibleRole.Slider;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable,true);}
         void Set(double value){set(Math.Max(min,Math.Min(max,Math.Round(value/step)*step)));Invalidate();}
         void Position(int x){int pad=(int)Math.Round(12*DeviceScale());Set(min+(max-min)*Math.Max(0,Math.Min(1,(x-pad)/(double)Math.Max(1,Width-2*pad))));}
-        float DeviceScale(){return 1;}
+        float DeviceScale(){return Skin.Scale;}
         protected override void OnMouseDown(MouseEventArgs e)
-        {if(e.Button==MouseButtons.Left){if(EditValue!=null&&e.Y<20&&e.X>=Width-170){EditValue();return;}Focus();int pad=(int)(12*DeviceScale());if(e.X<pad)Set(get()-step);else if(e.X>=Width-pad)Set(get()+step);else{dragging=true;Capture=true;Position(e.X);}}base.OnMouseDown(e);}
+        {if(e.Button==MouseButtons.Left){if(EditValue!=null&&e.Y<Skin.D(20)&&e.X>=Width-Skin.D(170)){EditValue();return;}Focus();int pad=(int)(12*DeviceScale());if(e.X<pad)Set(get()-step);else if(e.X>=Width-pad)Set(get()+step);else{dragging=true;Capture=true;Position(e.X);}}base.OnMouseDown(e);}
         protected override void OnMouseMove(MouseEventArgs e){if(dragging)Position(e.X);base.OnMouseMove(e);}
         protected override void OnMouseUp(MouseEventArgs e){dragging=false;Capture=false;base.OnMouseUp(e);}
         protected override bool IsInputKey(Keys key){return key==Keys.Left||key==Keys.Right||base.IsInputKey(key);}
@@ -90,62 +129,44 @@ namespace AutoCat
             Skin.TextAt(g,"+",new Rectangle(Width-pad,barY-Skin.D(g,6),pad,Skin.D(g,16)),Skin.Muted,TextFormatFlags.Right|TextFormatFlags.VerticalCenter);
         }
     }
-    sealed class ChoicePopup:Form
+    sealed class DarkMenuColors:ProfessionalColorTable
     {
-        readonly string[] values;readonly Action<int> choose;int selected;
-        public ChoicePopup(string[] values,int selected,int width,Action<int> choose)
-        {
-            this.values=values;this.selected=selected;this.choose=choose;FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;BackColor=Skin.Panel;Font=Skin.Font;DoubleBuffered=true;KeyPreview=true;AutoScaleMode=AutoScaleMode.None;ClientSize=new Size(width,values.Length*24+2);
-            Deactivate+=(a,b)=>Close();
-        }
-        protected override CreateParams CreateParams{get{var cp=base.CreateParams;cp.ExStyle|=0x80;return cp;}}
-        protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);Skin.Protect(Handle);}
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            using(var p=new Pen(Skin.Border))e.Graphics.DrawRectangle(p,0,0,Width-1,Height-1);
-            for(int i=0;i<values.Length;i++)
-            {
-                var r=new Rectangle(1,1+i*24,Width-2,24);if(i==selected)using(var b=new SolidBrush(Color.FromArgb(53,43,39)))e.Graphics.FillRectangle(b,r);
-                r.X+=9;r.Width-=15;Skin.TextAt(e.Graphics,values[i],r,i==selected?Color.White:Skin.Text);
-            }
-        }
-        protected override void OnMouseMove(MouseEventArgs e){selected=Math.Max(0,Math.Min(values.Length-1,(e.Y-1)/24));Invalidate();base.OnMouseMove(e);}
-        protected override void OnMouseDown(MouseEventArgs e){if(e.Button==MouseButtons.Left&&ClientRectangle.Contains(e.Location)){int index=Math.Max(0,Math.Min(values.Length-1,(e.Y-1)/24));choose(index);Close();}base.OnMouseDown(e);}
-        protected override void OnKeyDown(KeyEventArgs e)
-        {if(e.KeyCode==Keys.Escape)Close();else if(e.KeyCode==Keys.Enter){choose(selected);Close();}else if(e.KeyCode==Keys.Up||e.KeyCode==Keys.Down){selected=(selected+values.Length+(e.KeyCode==Keys.Down?1:-1))%values.Length;Invalidate();}base.OnKeyDown(e);}
+        static Color Hover{get{return Color.FromArgb((Skin.Panel.R*4+Skin.Accent.R)/5,(Skin.Panel.G*4+Skin.Accent.G)/5,(Skin.Panel.B*4+Skin.Accent.B)/5);}}
+        public override Color ToolStripDropDownBackground{get{return Skin.Panel;}}
+        public override Color ImageMarginGradientBegin{get{return Skin.Panel;}}
+        public override Color ImageMarginGradientMiddle{get{return Skin.Panel;}}
+        public override Color ImageMarginGradientEnd{get{return Skin.Panel;}}
+        public override Color MenuBorder{get{return Skin.Border;}}
+        public override Color MenuItemBorder{get{return Hover;}}
+        public override Color MenuItemSelected{get{return Hover;}}
+        public override Color MenuItemSelectedGradientBegin{get{return Hover;}}
+        public override Color MenuItemSelectedGradientEnd{get{return Hover;}}
+        public override Color MenuItemPressedGradientBegin{get{return Hover;}}
+        public override Color MenuItemPressedGradientEnd{get{return Hover;}}
     }
-    sealed class MicroSelect:Control
+    sealed class DarkMenuRenderer:ToolStripProfessionalRenderer
     {
-        readonly string[] values;readonly Func<int> get;readonly Action<int> set;
-        public MicroSelect(string[] values,Func<int> getter,Action<int> setter){this.values=values;get=getter;set=setter;Height=22;TabStop=true;AccessibleRole=AccessibleRole.ComboBox;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable,true);}
-        void Open()
-        {
-            Focus();var popup=new ChoicePopup(values,Math.Max(0,Math.Min(values.Length-1,get())),Width,i=>{set(i);Invalidate();});
-            Point p=PointToScreen(new Point(0,Height+2));Rectangle screen=Screen.FromControl(this).WorkingArea;
-            popup.StartPosition=FormStartPosition.Manual;popup.Location=new Point(Math.Min(p.X,screen.Right-popup.Width),p.Y+popup.Height>screen.Bottom?p.Y-Height-popup.Height-2:p.Y);popup.Show(FindForm());
-        }
-        protected override void OnMouseDown(MouseEventArgs e){if(e.Button==MouseButtons.Left)Open();base.OnMouseDown(e);}
-        protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter||e.KeyCode==Keys.Down){Open();e.Handled=true;}base.OnKeyDown(e);}
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            using(var b=new LinearGradientBrush(ClientRectangle,Color.FromArgb(38,38,43),Color.FromArgb(28,28,32),90))e.Graphics.FillRectangle(b,ClientRectangle);
-            using(var p=new Pen(Focused?Skin.Accent:Skin.Border))e.Graphics.DrawRectangle(p,0,0,Width-1,Height-1);
-            Skin.TextAt(e.Graphics,values[Math.Max(0,Math.Min(values.Length-1,get()))],new Rectangle(7,0,Width-25,Height),Skin.Text);
-            int x=Width-11,y=Height/2;using(var b=new SolidBrush(Skin.Muted))e.Graphics.FillPolygon(b,new Point[]{new Point(x-3,y-1),new Point(x+3,y-1),new Point(x,y+2)});
-        }
+        public DarkMenuRenderer():base(new DarkMenuColors()){RoundedEdges=false;}
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e){e.TextColor=e.Item.Selected?Color.White:Skin.Text;base.OnRenderItemText(e);}
     }
     sealed class MenuTabs:Control
     {
-        public readonly string[] Tabs={"auto clicker","automation","experimental","misc"};public int Selected;public Action<int> Change;
+        public readonly string[] Tabs={"auto clicker","automation","experimental","theme","misc"};public int Selected;public Action<int> Change;
         public MenuTabs(){Height=40;TabStop=true;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.Selectable,true);}
+        // Uniform columns clip "experimental" at 5 tabs; size each to its own label, then stretch to fill Width.
+        int[] ColumnWidths(){var widths=new int[Tabs.Length];int total=0,pad=Skin.D(16);
+            for(int i=0;i<Tabs.Length;i++){widths[i]=TextRenderer.MeasureText(Tabs[i],Skin.Font,Size.Empty,TextFormatFlags.NoPadding).Width+pad;total+=widths[i];}
+            if(total>0&&Width>0){int assigned=0;for(int i=0;i<widths.Length;i++){int share=i==widths.Length-1?Width-assigned:(int)Math.Round(widths[i]*(Width/(double)total));assigned+=share;widths[i]=share;}}
+            return widths;}
         public void Select(int index){Selected=index;Invalidate();if(Change!=null)Change(index);}
-        protected override void OnMouseDown(MouseEventArgs e){if(e.Button==MouseButtons.Left){Focus();Select(Math.Min(Tabs.Length-1,e.X*Tabs.Length/Width));}base.OnMouseDown(e);}
+        protected override void OnMouseDown(MouseEventArgs e){if(e.Button==MouseButtons.Left){Focus();var widths=ColumnWidths();int x=0;for(int i=0;i<widths.Length;i++){x+=widths[i];if(e.X<x){Select(i);break;}}}base.OnMouseDown(e);}
         protected override bool IsInputKey(Keys key){return key==Keys.Left||key==Keys.Right||base.IsInputKey(key);}
         protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Left||e.KeyCode==Keys.Right){Select((Selected+(e.KeyCode==Keys.Right?1:Tabs.Length-1))%Tabs.Length);e.Handled=true;}base.OnKeyDown(e);}
         protected override void OnPaint(PaintEventArgs e)
         {
+            var widths=ColumnWidths();int x=0;
             for(int i=0;i<Tabs.Length;i++)
-            {var r=new Rectangle(i*Width/Tabs.Length,0,Width/Tabs.Length,Height-5);Skin.TextAt(e.Graphics,Tabs[i],r,i==Selected?Color.White:Skin.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);using(var p=new Pen(i==Selected?Skin.Accent:Skin.Border,2))e.Graphics.DrawLine(p,r.Left+3,Height-5,r.Right-3,Height-5);}
+            {var r=new Rectangle(x,0,widths[i],Height-5);Skin.TextAt(e.Graphics,Tabs[i],r,i==Selected?Color.White:Skin.Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);using(var p=new Pen(i==Selected?Skin.Accent:Skin.Border,2))e.Graphics.DrawLine(p,r.Left+3,Height-5,r.Right-3,Height-5);x+=widths[i];}
         }
     }
 }

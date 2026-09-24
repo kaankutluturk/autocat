@@ -49,7 +49,7 @@ namespace AutocatBridge {
    if(lastFrame>0){float dt=nowFrame-lastFrame;windowTime+=dt;windowFrames++;if(dt>windowWorst)windowWorst=dt;}
    lastFrame=nowFrame;
    if(windowTime>=0.5f){frameAverage=windowTime/Math.Max(1,windowFrames);framePeak=windowWorst;
-    // Bug A's actual symptom (repeated exception/catch overhead) inflated frameAverage far past these numbers. A 17.5ms/17.2ms degrade/recover band is within ordinary frame-time jitter on a healthy machine and ratchets emoteBudget to the floor under normal play (observed: avg 17.6ms/peak 19.5ms -> 0.3/s). Widened so only genuinely bad frame pacing triggers throttling, and recovery is no longer near-unreachable.
+    // A narrow degrade/recover band sits inside ordinary frame-time jitter and would ratchet emoteBudget to the floor under normal play; this band only throttles on genuinely bad frame pacing and keeps recovery reachable.
     if(frameAverage>0.028f)slowWindows++;else slowWindows=0;
     if(slowWindows>=3||frameAverage>0.045f){emoteBudget=Math.Max(0.25f,emoteBudget*0.65f);tapScale=Math.Max(0.05f,tapScale*0.7f);}
     else if(frameAverage<0.022f&&framePeak<0.04f){if(running&&emoting)emoteBudget=Math.Min(emoteRate,emoteBudget+Math.Max(2,emoteRate*0.1f));tapScale=Math.Min(1,tapScale+0.05f);}

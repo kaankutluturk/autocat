@@ -1,6 +1,6 @@
 using System;using System.Collections;using System.Collections.Generic;using System.Reflection;using System.Text;using UnityEngine;
 namespace AutocatBridge {
-// Renderer-only experiment. Never calls CatCosmetics.Equip or any Steam mutator.
+// Renderer-only preview. Never calls CatCosmetics.Equip or any Steam mutator.
 public sealed class CosmeticPreview {
  const BindingFlags Flags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static;
  readonly Assembly game;readonly Func<string> prefs;readonly Action<string> log;readonly Action<string,int> broadcast;readonly Dictionary<int,object> catalog=new Dictionary<int,object>();readonly List<Action> restore=new List<Action>();

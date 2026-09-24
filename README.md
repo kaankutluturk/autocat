@@ -19,7 +19,8 @@ emoting, collects and stacks gifts, exchanges duplicate cosmetics and emotes,
 and can temporarily preview unowned cosmetics and emotes during a session. It
 calls Bongo Cat's own functions directly instead of simulating mouse or
 keyboard input, and it never replaces or modifies any installed Bongo Cat
-file.
+file. The menu sizes itself to your display, and its accent color is yours to
+pick.
 
 ## Download and run
 
@@ -27,6 +28,12 @@ Download `autocat.exe` from the [Releases page](https://github.com/kaankutluturk
 and run it. It's a single self-contained file: no installer, no separate
 DLL, nothing else to place alongside it. Bongo Cat can already be running or
 not; AutoCat attaches automatically either way.
+
+## Updating
+
+Close AutoCat and Bongo Cat, replace your `autocat.exe` with the new one, and
+launch it. Your settings carry over, and files left behind by older versions
+are cleaned up automatically.
 
 ## First launch and controls
 
@@ -42,7 +49,8 @@ menu forward instead of opening a second copy.
 | Auto Clicker | Auto clicking (1 to 200/sec) and auto emoting (1 to 100/sec, reusable equipped emotes only, no consumables) toggle independently and share one pause/resume state. |
 | Automation | Auto Collect submits eligible normal and emote gift claims. Auto-slot + Exchange trades real eligible duplicate cosmetics and emotes and never touches a slot you filled manually. |
 | Experimental | Insta Gift and Unlock All, both described below. |
-| Misc | Key bindings, save/reset settings, unload, and Extreme Rates. |
+| Theme | Pick your own accent color with a color wheel or a hex code. |
+| Misc | Key bindings, reset settings, unload, and Extreme Rates. |
 
 **Insta Gift and Auto Collect.** Steam grants normal and emote gift tokens at
 intervals that aren't defined, and each balance can accumulate up to 10. The
@@ -59,13 +67,25 @@ permanently add anything to your account or Steam inventory, and it never
 removes anything you legitimately own. Temporary items disappear when you
 disable Unlock All, unload AutoCat, or restart Bongo Cat.
 
+## Display and appearance
+
+The menu sizes itself to your display, following both your Windows scaling
+setting and your screen resolution. If you change either while AutoCat is
+open, or drag the menu to a monitor with different scaling, it resizes on its
+own.
+
+The **theme** tab sets the accent color used for the logo, highlights, and
+sliders. Pick one on the color wheel or type a hex code; **reset** brings back
+the original. Reset Settings in the Misc tab restores it too.
+
 ## Settings and logs
 
-Settings are saved to `Documents\AutoCat\settings.xml` and logs to
-`Documents\AutoCat\logs\`, regardless of where `autocat.exe` runs from.
-Right-click the status footer to open the logs folder, copy the current
-session ID, or copy a full diagnostic summary. Logs stay on your machine and
-are never uploaded automatically.
+Settings save automatically a moment after you change them, and again when
+you hide the menu or unload. They live in `Documents\AutoCat\settings.xml`
+and logs in `Documents\AutoCat\logs\`, regardless of where `autocat.exe`
+runs from. Right-click the status footer to open the logs folder, copy the
+current session ID, or copy a full diagnostic summary. Logs stay on your
+machine and are never uploaded automatically.
 
 ## Limitations
 
@@ -75,6 +95,8 @@ are never uploaded automatically.
 - Extreme Rates raises the values you can request, not what the game can
   actually deliver.
 - A Bongo Cat update may require a matching AutoCat release.
+- Resizing while open needs Windows 10 version 1703 or later. On older
+  Windows the menu is sized once, when AutoCat starts.
 
 ## Reporting a problem
 
