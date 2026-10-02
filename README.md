@@ -16,11 +16,11 @@
 
 AutoCat is a compact Windows utility for Bongo Cat. It automates clicking and
 emoting, collects and stacks gifts, exchanges duplicate cosmetics and emotes,
-and can temporarily preview unowned cosmetics and emotes during a session. It
-calls Bongo Cat's own functions directly instead of simulating mouse or
-keyboard input, and it never replaces or modifies any installed Bongo Cat
-file. The menu sizes itself to your display, and its accent color is yours to
-pick.
+and can temporarily use supported unowned cosmetics, UI Themes, and emotes
+during a session. AutoCat calls Bongo Cat's own functions directly instead of
+simulating mouse or keyboard input, and it never replaces or modifies any
+installed Bongo Cat file. The menu sizes itself to your display, and its
+accent color is yours to pick.
 
 ## Download and run
 
@@ -61,11 +61,11 @@ back to back and stack the resulting chests, instead of checking in every
 few minutes. This automates existing eligibility. It doesn't manipulate
 tokens.
 
-**Unlock All.** Temporarily adds unowned cosmetics and emotes to the running
-session, selected through the normal in-game inventory. It doesn't
-permanently add anything to your account or Steam inventory, and it never
-removes anything you legitimately own. Temporary items disappear when you
-disable Unlock All, unload AutoCat, or restart Bongo Cat.
+**Unlock All.** Temporarily makes supported eligible unowned hats, skins, UI
+Themes, and emotes available through the normal in-game inventory during the
+current session. It does not change Steam ownership or inventory quantities,
+and never removes anything you legitimately own. Turning Unlock All off or
+unloading AutoCat restores normal availability and your legitimate equipment.
 
 ## Display and appearance
 

@@ -6,7 +6,7 @@ $versionSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'src\AssemblyIn
 $assemblyVersion = [regex]::Match($versionSource,'AssemblyVersion\("([\d.]+)"\)').Groups[1].Value
 if (!$assemblyVersion -or $assemblyVersion -ne [regex]::Match($versionSource,'AssemblyFileVersion\("([\d.]+)"\)').Groups[1].Value) { throw 'AssemblyVersion and AssemblyFileVersion must be set and identical.' }
 # The runtime identity counter has a single source: src/EmbeddedRuntime.cs.
-$runtimeId = [regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'src\EmbeddedRuntime.cs')),'RuntimeId="(\d+)"').Groups[1].Value
+$runtimeId = [regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'src\EmbeddedRuntime.cs')),'RuntimeId\s*=\s*"(\d+)"').Groups[1].Value
 if (!$runtimeId) { throw 'RuntimeId not found in src\EmbeddedRuntime.cs.' }
 $runtimeFile = "autocat.runtime.$runtimeId.dll"
 Get-ChildItem -LiteralPath $OutputDirectory -Filter 'autocat.runtime.*.dll' | Remove-Item
@@ -33,7 +33,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Runtime component compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 Remove-Item -LiteralPath $referencePath
 Remove-Item -LiteralPath $referenceDirectory
-
 
 
 

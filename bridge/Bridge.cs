@@ -65,6 +65,7 @@ namespace AutocatBridge {
       if(!emoteResolved){emoteResolved=true;var donut=Static(donutType,"Instance");
       if(donut!=null){var entries=(IDictionary)Field(donut,"IDtoEmoteEntry");IList deadKeys=null;foreach(DictionaryEntry pair in entries){var entryComponent=pair.Value as Component;if(entryComponent==null){if(deadKeys==null)deadKeys=new System.Collections.Generic.List<object>();deadKeys.Add(pair.Key);continue;}var item=Field(pair.Value,"_steamItem");if(item!=null&&!(bool)Call(item,"get_IsConsumable")){frameEmote=pair.Value;break;}}
       if(deadKeys!=null){foreach(var key in deadKeys)entries.Remove(key);try{Call(donut,"RearrangeEmotes");}catch(Exception e){diagnostics.Fault("Emotes","wheel.rearrange.failed",e);}EmoteDiagnostic("pruned dead wheel entries="+deadKeys.Count.ToString());}}
+      if(frameEmote==null&&nativeUnlock!=null&&wantUnlock)frameEmote=nativeUnlock.TemporaryReusable();
       }if(frameEmote==null)problem="Emotes: equip a non-consumable emote";
       else {try{var spawner=(Component)Field(frameEmote,"_emoteSpawner");if(spawner!=null&&spawner.gameObject.activeInHierarchy){Call(frameEmote,"SpawnEmoteParticle");emoteCalls++;}else problem="Emotes: cat is inactive";}catch(Exception spawnEx){frameEmote=null;problem="Emotes: equip a non-consumable emote";EmoteDiagnostic("stale frameEmote at spawn: "+((spawnEx.InnerException??spawnEx).GetType().Name)+" "+((spawnEx.InnerException??spawnEx).Message));}}
      }
@@ -144,7 +145,7 @@ namespace AutocatBridge {
     }
    }
   }catch(Exception e){if(!closed){diagnostics.Fault("Connection","server.failed",e);problem="Connection: "+e.Message;Entry.Note(e.ToString());}}finally{lock(gate){pipe=null;}running=false;}if(!closed)Thread.Sleep(250);}}
-  void LateUpdate(){if(nativeUnlock!=null&&wantUnlock&&preview!=null){try{nativeUnlock.Advance();preview.Maintain();}catch(Exception e){diagnostics.Fault("UnlockAll","maintenance.failed",e);problem="Unlock all: "+(e.InnerException??e).Message;unlockFailed=true;if(nativeUnlock!=null){nativeUnlock.Disable();nativeUnlock=null;}}}}
+  void LateUpdate(){if(nativeUnlock!=null&&wantUnlock&&preview!=null){try{nativeUnlock.Advance();nativeUnlock.MaintainTheme();preview.Maintain();}catch(Exception e){diagnostics.Fault("UnlockAll","maintenance.failed",e);problem="Unlock all: "+(e.InnerException??e).Message;unlockFailed=true;if(nativeUnlock!=null){nativeUnlock.Disable();nativeUnlock=null;}}}}
   void OnDestroy(){diagnostics.Write(LogLevel.Info,"Runtime","cleanup.started","Restoring temporary state");bool clean=true;try{if(nativeUnlock!=null)nativeUnlock.Disable();diagnostics.Write(LogLevel.Info,"Runtime","cleanup.native","Native temporary state cleanup returned");}catch(Exception e){clean=false;diagnostics.Fault("Runtime","cleanup.native.failed",e);}finally{nativeUnlock=null;}try{if(preview!=null)preview.Disable();diagnostics.Write(LogLevel.Info,"Runtime","cleanup.renderer","Renderer cleanup returned");}catch(Exception e){clean=false;diagnostics.Fault("Runtime","cleanup.renderer.failed",e);}finally{preview=null;}FlushRepairDiagnostics(true);foreach(var o in exchangeObservations)diagnostics.Values(LogLevel.Warn,"Exchange","shutdown.unverified","request={0}; outcome still pending",o.Id);running=false;closed=true;try{lock(gate){if(pipe!=null)pipe.Dispose();}}catch(Exception e){clean=false;diagnostics.Fault("Runtime","cleanup.pipe.failed",e);}diagnostics.Write(clean?LogLevel.Info:LogLevel.Warn,"Runtime",clean?"cleanup.restored":"cleanup.partial",clean?"All cleanup units returned":"One or more cleanup units failed; remaining units were still attempted");diagnostics.Write(LogLevel.Info,"Runtime","stopped","Worker destroyed; queued diagnostics drain asynchronously");diagnostics.Dispose();Entry.Removed();}
  }
  public sealed class ExchangeRunner:MonoBehaviour {
@@ -158,7 +159,6 @@ namespace AutocatBridge {
   public MethodInfo Method(Type type,string name,int count){System.Collections.Generic.Dictionary<string,MethodInfo[]> entries;if(!methods.TryGetValue(type,out entries)){entries=new System.Collections.Generic.Dictionary<string,MethodInfo[]>();methods[type]=entries;}MethodInfo[] overloads;if(!entries.TryGetValue(name,out overloads)){overloads=new MethodInfo[8];entries[name]=overloads;}if(count>=overloads.Length)throw new MissingMethodException(name);if(overloads[count]!=null)return overloads[count];foreach(var m in type.GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static))if(m.Name==name&&m.GetParameters().Length==count){overloads[count]=m;return m;}throw new MissingMethodException(name);}
  }
 }
-
 
 
 
