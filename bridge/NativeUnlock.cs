@@ -600,6 +600,7 @@ public sealed class NativeUnlock {
         selected.Clear();
         foreach (var row in rows) {
             var entry = row;
+            if (!Alive(entry.Component))continue;
             cleanup(() => {
                 lookup.Field(entry.Component.GetType(), "_initialized").SetValue(entry.Component, false);
                 C(entry.Component, "OnItemUpdated");

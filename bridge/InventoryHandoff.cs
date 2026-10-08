@@ -16,4 +16,13 @@ public static class InventoryHandoff {
         return count < 2 ? 0 : (float)index / (count - 1) * (20 * count) - (20 * count) / 2f;
     }
 }
+// Unlock All can already be on while the game is still creating its cat or filling its item catalog.
+// Only that wait is retried, and only for a bounded number of attempts.
+public sealed class PreviewNotReadyException : Exception {
+    public const int Attempts = 60;
+    public PreviewNotReadyException(string message) : base(message) { }
+    public static bool Retry(Exception error, int failures) {
+        return error is PreviewNotReadyException && failures < Attempts;
+    }
+}
 }
