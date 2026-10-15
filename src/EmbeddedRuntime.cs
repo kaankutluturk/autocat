@@ -8,7 +8,7 @@ static class EmbeddedRuntime {
     // A running game cannot reload an assembly with the same name, so restart Bongo Cat after
     // changing the runtime. Release IDs follow the version digits (1.0.1 -> 101, 1.1.1 -> 111).
     // build.ps1 reads the value from this line and rejects one that does not match the version.
-    internal const string RuntimeId = "120";
+    internal const string RuntimeId = "121";
     internal static string FileName {
         get { return "autocat.runtime." + RuntimeId + ".dll"; }
     }

@@ -11,6 +11,10 @@ public sealed class CosmeticPreview {
     const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
         BindingFlags.Static;
 
+    // Cat's per-slot sprite fields. Bongos use the same four poses as skins.
+    static readonly string[] SkinSprites = {"_catNormal", "_catLeft", "_catNormalFront", "_catRightFront"};
+    static readonly string[] BongosSprites = {"_bongosLeft", "_bongosLeftPunch", "_bongosRight", "_bongosRightPunch"};
+
     readonly Assembly game;
     readonly Func<string> prefs;
     readonly Action<string> log;
@@ -34,6 +38,12 @@ public sealed class CosmeticPreview {
 
     object Instance(string type, string field) {
         return game.GetType(type, true, false).GetField(field, Flags).GetValue(null);
+    }
+
+    // Older game builds name _bodyImage _catImage, and _rightPawImage _catFront.
+    string CatField(string current, string previous) {
+        var type = cat.GetType();
+        return type.GetField(current, Flags) == null && type.GetField(previous, Flags) != null ? previous : current;
     }
 
     string Equipped() {
@@ -78,12 +88,15 @@ public sealed class CosmeticPreview {
         originalPrefs = prefs();
         originalEquipped = Equipped();
         restore.Clear();
-        foreach (var name in new[] {"_catNormal", "_catLeft", "_catNormalFront", "_catRightFront"}) {
-            var field = cat.GetType().GetField(name, Flags);
-            var value = field.GetValue(cat);
-            restore.Add(() => field.SetValue(cat, value));
-        }
-        foreach (var name in new[] {"_hatImage", "_catImage", "_catFront"}) {
+        foreach (var names in new[] {SkinSprites, BongosSprites})
+            foreach (var name in names) {
+                var field = cat.GetType().GetField(name, Flags);
+                var value = field.GetValue(cat);
+                restore.Add(() => field.SetValue(cat, value));
+            }
+        foreach (var name in new[] {"_hatImage", CatField("_bodyImage", "_catImage"),
+                CatField("_rightPawImage", "_catFront"), "_bongosLeftBackImage", "_bongosLeftFrontImage",
+                "_bongosRightImage"}) {
             var img = Field(cat, name);
             var prop = img.GetType().GetProperty("sprite");
             var value = prop.GetValue(img, null);
@@ -105,17 +118,17 @@ public sealed class CosmeticPreview {
         string slot = Field(item, "ItemSlot").ToString();
         if (slot == "hat") {
             if (Field(item, "FullImage") == null)throw new Exception("Missing hat asset");
-        } else if (slot == "skin") {
+        } else if (slot == "skin" || slot == "bongos") {
             var cache = Instance("BongoCat.MemoryImageCache", "Instance");
             string name = Call(item, "get_ItemName").ToString().Replace(" ", "");
             foreach (var suffix in new[] {"Left", "LeftPunch", "Right", "RightPunch"})
-                if (Call(cache, "GetSprite", name + suffix) == null)throw new Exception("Missing skin asset");
+                if (Call(cache, "GetSprite", name + suffix) == null)throw new Exception("Missing " + slot + " asset");
         } else throw new Exception("Unsupported cosmetic slot");
     }
 
     public void Clear(string slot) {
         float start = Time.realtimeSinceStartup;
-        if (slot != "hat" && slot != "skin")throw new Exception("Unsupported cosmetic slot");
+        if (slot != "hat" && slot != "skin" && slot != "bongos")throw new Exception("Unsupported cosmetic slot");
         if (!Active)Snapshot();
         string beforePrefs = prefs(), beforeEquipped = Equipped();
         try {
@@ -186,8 +199,8 @@ public sealed class CosmeticPreview {
 
     void CaptureExpected(string slot) {
         var checks = new List<Func<bool>>();
-        if (slot == "skin") {
-            foreach (var name in new[] {"_catNormal", "_catLeft", "_catNormalFront", "_catRightFront"}) {
+        if (slot == "skin" || slot == "bongos") {
+            foreach (var name in slot == "skin" ? SkinSprites : BongosSprites) {
                 var field = cat.GetType().GetField(name, Flags);
                 var value = field.GetValue(cat);
                 checks.Add(() => System.Object.ReferenceEquals(field.GetValue(cat), value));
@@ -249,16 +262,12 @@ public sealed class CosmeticPreview {
                         if (failure == null)failure = e;
                     }
             } else {
-                try {
-                    Call(cat, "ClearItemSlot", "hat");
-                } catch (Exception e) {
-                    if (failure == null)failure = e;
-                }
-                try {
-                    Call(cat, "ClearItemSlot", "skin");
-                } catch (Exception e) {
-                    if (failure == null)failure = e;
-                }
+                foreach (var slot in new[] {"hat", "skin", "bongos"})
+                    try {
+                        Call(cat, "ClearItemSlot", slot);
+                    } catch (Exception e) {
+                        if (failure == null)failure = e;
+                    }
                 try {
                     foreach (var item in (IEnumerable)Field(cosmetics, "EquippedItems"))
                         try {

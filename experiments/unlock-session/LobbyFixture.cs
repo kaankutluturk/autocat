@@ -4,6 +4,7 @@ public sealed class LobbyData {
     public ulong _id = 1;
     public int MyHat { get; set; }
     public int MySkin { get; set; }
+    public int MyBongos { get; set; }
     public bool IsValid { get { return true; } }
 }
 }

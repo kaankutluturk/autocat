@@ -19,6 +19,12 @@ public sealed class NativeUnlock {
         public bool Dex;
     }
 
+    // The inventory's item collections that Unlock All adopts.
+    static readonly string[] Collections = {
+        "_hatsCollection", "_skinsCollection", "_bongosCollection", "_emoteCollection",
+        "_consumableCollection", "_uiThemeCollection"
+    };
+
     readonly DictionaryCache lookup = new DictionaryCache();
     readonly Assembly game;
     readonly CosmeticPreview visuals;
@@ -54,6 +60,13 @@ public sealed class NativeUnlock {
     int Id(object item) { return (int)C(item, "get_Id"); }
     string Slot(object item) { return F(item, "ItemSlot").ToString(); }
     bool Alive(object value) { return (value as Component) != null; }
+    // Older game builds name this method SetSeparatorVisibility.
+    void RefreshSections() {
+        var type = inventory.GetType();
+        C(inventory, type.GetMethod("UpdateSectionVisibility", Flags, null, Type.EmptyTypes, null) == null &&
+            type.GetMethod("SetSeparatorVisibility", Flags, null, Type.EmptyTypes, null) != null ?
+            "SetSeparatorVisibility" : "UpdateSectionVisibility");
+    }
     bool Blocked() {
         return (bool)C(S("BongoCat.ItemExchange", "Instance"), "get_IsVisible") ||
             (bool)C(S("Steam.TrashCan", "Instance"), "get_InTrashMode");
@@ -78,16 +91,13 @@ public sealed class NativeUnlock {
         builder = AdoptRows();
     }
     IEnumerator AdoptRows() {
-        foreach (string name in new[] {
-            "_hatsCollection", "_skinsCollection", "_emoteCollection",
-            "_consumableCollection", "_uiThemeCollection"
-        }) {
+        foreach (string name in Collections) {
             var collection = F(inventory, name);
             foreach (var component in (IEnumerable)F(collection, "_collectionItems")) {
                 var item = F(component, "SteamItem");
                 if (item == null)continue;
                 string slot = Slot(item);
-                if (slot != "hat" && slot != "skin" && slot != "emote" &&
+                if (slot != "hat" && slot != "skin" && slot != "bongos" && slot != "emote" &&
                             slot != "consumable" && slot != "uitheme")continue;
                 if (slot == "uitheme" && !SupportedTheme(item))continue;
                 AdoptRow(collection, component, item);
@@ -96,7 +106,7 @@ public sealed class NativeUnlock {
         }
         var dex = AdoptDexRows();
         while (dex.MoveNext())yield return null;
-        C(inventory, "SetSeparatorVisibility");
+        RefreshSections();
         log("native inventory rows adopted=" + rows.Count + " ownership unchanged");
     }
     void FindDexView() {
@@ -520,18 +530,22 @@ public sealed class NativeUnlock {
             entries[i].transform.localPosition = new Vector3(Mathf.Sin(angle), Mathf.Cos(angle), 0) * radius;
         }
     }
+    // Heathen LobbyData has one setter per cosmetic slot.
+    static string LobbySetter(string slot) {
+        return slot == "hat" ? "set_MyHat" : slot == "bongos" ? "set_MyBongos" : "set_MySkin";
+    }
     void Broadcast() {
         var lobby = lobbyType.GetField("Current", Flags).GetValue(null);
         if (!(bool)C(lobby, "get_IsValid"))return;
         foreach (var pair in selected) {
-            C(lobby, pair.Key == "hat" ? "set_MyHat" : "set_MySkin", pair.Value);
+            C(lobby, LobbySetter(pair.Key), pair.Value);
         }
     }
     public void BroadcastSlot(string slot, int id) {
         RefreshSlot(slot);
         var lobby = lobbyType.GetField("Current", Flags).GetValue(null);
         if ((bool)C(lobby, "get_IsValid")) {
-            C(lobby, slot == "hat" ? "set_MyHat" : "set_MySkin", id);
+            C(lobby, LobbySetter(slot), id);
         }
     }
     public void Tick() {
@@ -614,10 +628,7 @@ public sealed class NativeUnlock {
         }
         // Recalculate inventory roots without emitting item-wide callbacks: those
         // also include native consumable depletion/quantity listeners.
-        foreach (string name in new[] {
-            "_hatsCollection", "_skinsCollection", "_emoteCollection",
-            "_consumableCollection", "_uiThemeCollection"
-        }) {
+        foreach (string name in Collections) {
             string collectionName = name;
             cleanup(() => {
                 var root = (Transform)F(F(inventory, collectionName), "_collectionRoot");
@@ -634,7 +645,7 @@ public sealed class NativeUnlock {
         rows.Clear();
         rowById.Clear();
         adopted.Clear();
-        cleanup(() => C(inventory, "SetSeparatorVisibility"));
+        cleanup(() => RefreshSections());
         log("native unlock disabled; original row events and legitimate presentation restored");
         if (failure != null)throw new Exception("Native unlock cleanup completed with failures", failure);
     }

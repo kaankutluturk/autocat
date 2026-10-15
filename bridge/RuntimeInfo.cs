@@ -7,7 +7,7 @@ using System.Reflection;
 [assembly: AssemblyProduct("AutoCat")]
 [assembly: AssemblyCompany("AutoCat")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Kaan Kutluturk")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
 
 // The game's trimmed mscorlib does not define these. The compiler writes the file's version resource from them by name.
 namespace System.Reflection {

@@ -135,6 +135,15 @@ public sealed partial class Worker : MonoBehaviour {
     int Number(object obj, string name) { return Convert.ToInt32(Field(obj, name)); }
     bool Flag(object obj, string name) { return (bool)Field(obj, name); }
 
+    // First inventory tab of an exchange group, read from the game's own tab lists. Tab indices shift when the
+    // game adds a tab, and a stale index silently selects the wrong category, so there is no fixed fallback.
+    int ExchangeTab(object ex, int group) {
+        string name = group == 0 ? "CosmeticTabs" : "EmoteTabs";
+        var tabs = Static(ex.GetType(), name) as int[];
+        if (tabs == null || tabs.Length == 0)throw new MissingFieldException(name);
+        return tabs[0];
+    }
+
     void Update() {
         if (closed) {
             Destroy(gameObject);
@@ -395,7 +404,7 @@ public sealed partial class Worker : MonoBehaviour {
                             null
                         };
                         if ((bool)ready.Invoke(ex, arguments)) {
-                            Call(ex, "OpenTab", group == 0 ? 0 : 2);
+                            Call(ex, "OpenTab", ExchangeTab(ex, group));
                             // Recheck after changing category, before touching slots.
                             if ((bool)ready.Invoke(ex, arguments)) {
                                 try {

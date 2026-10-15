@@ -8,6 +8,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 class UnlockSessionTests {
+    // Lobby value no test broadcast has written yet.
+    const int Untouched = -2;
     static int passed;
     static void Assert(bool value, string name) { if (!value)throw new Exception(name); }
 
@@ -32,6 +34,8 @@ class UnlockSessionTests {
             EmoteDonut.Instance = Wheel = new EmoteDonut();
             UiThemeManager.Instance = Themes = new UiThemeManager();
             BongoCat.Multiplayer.SteamMultiplayer.Sent = 0;
+            var lobby = Heathen.SteamworksIntegration.LobbyData.Current;
+            lobby.MyHat = lobby.MySkin = lobby.MyBongos = Untouched;
             DexView = new BongoCat.UI.BongoDexView();
             Add(1, "hat", 1);
             Add(2, "hat", 0);
@@ -45,7 +49,10 @@ class UnlockSessionTests {
             Add(10, "consumable", 1);
             Add(11, "skin", 1);
             Add(12, "skin", 0);
+            Add(13, "bongos", 1);
+            Add(14, "bongos", 0);
             CatCosmetics.Instance.EquipItem(Items[11], true, true, true);
+            CatCosmetics.Instance.EquipItem(Items[13], true, true, true);
             foreach (int id in new[] {3, 4, 8})Themes._themes.Themes[id] = new UiTheme(id);
             Themes.Current = Themes._themes.GetById(3);
             Items[3].IsEquipped = true;
@@ -99,8 +106,10 @@ class UnlockSessionTests {
     static void Main() {
         Check("native rows adopted once, eligibility and filters preserved", () => {
             var f = new Fixture(true);
-            Assert(f.Unlock.Added == 11 && f.Inventory._hatsCollection._collectionItems.Count == 2,
-                "no duplicate rows");
+            Assert(f.Unlock.Added == 13 && f.Inventory._hatsCollection._collectionItems.Count == 2 &&
+                f.Inventory._bongosCollection._collectionItems.Count == 2, "no duplicate rows");
+            Assert(f.Rows[14].gameObject.activeSelf && !f.Rows[14]._preview.activeSelf &&
+                !f.Rows[14]._unownedOverlay.enabled, "unowned bongos presentation");
             Assert(System.Object.ReferenceEquals(f.Rows[7].Button.onClick, f.Rows[7].Saved),
                 "unsupported theme stays native");
             Assert(f.Rows[2].gameObject.activeSelf && !f.Rows[2]._preview.activeSelf &&
@@ -168,11 +177,48 @@ class UnlockSessionTests {
                 !f.Rows[12]._equippedIcon.enabled, "owned skin A virtual B owned A");
             f.Unlock.Disable();
         });
+        Check("bongos temporary preview, clear and owned reselection use their own lobby field", () => {
+            var f = new Fixture(true);
+            var lobby = Heathen.SteamworksIntegration.LobbyData.Current;
+            int writes = FakePrefs.Writes;
+            f.Click(14);
+            Assert(f.Visuals.Chosen == 14 && f.Rows[14].NativeClicks == 0 && FakePrefs.Writes == writes,
+                "temporary bongos boundary");
+            Assert(f.Rows[14]._equippedIcon.enabled && !f.Rows[13]._equippedIcon.enabled &&
+                f.Rows[11]._equippedIcon.enabled, "exclusive bongos badges leave skin alone");
+            Assert(lobby.MyBongos == 14 && lobby.MyHat == Untouched && lobby.MySkin == Untouched,
+                "bongos broadcast reaches only MyBongos");
+            f.Click(14);
+            Assert(f.Visuals.Clears == 1 && !f.Rows[14]._equippedIcon.enabled &&
+                !f.Rows[13]._equippedIcon.enabled && lobby.MyBongos == -1, "temporary bongos clear");
+            f.Click(13);
+            Assert(f.Items[13].IsEquipped && f.Rows[13]._equippedIcon.enabled && f.Rows[13].NativeClicks == 1 &&
+                f.Visuals.Adopts == 1, "owned bongos native repair after virtual clear");
+            f.Click(14);
+            f.Click(13);
+            Assert(f.Items[13].IsEquipped && f.Visuals.Adopts == 2 && f.Rows[13]._equippedIcon.enabled &&
+                !f.Rows[14]._equippedIcon.enabled, "owned bongos A virtual B owned A");
+            f.Items[14].Quantity = 1;
+            f.Click(14);
+            Assert(f.Rows[14].NativeClicks == 1 && f.Visuals.Selects == 2, "bongos ownership reevaluated on click");
+            f.Unlock.Disable();
+        });
+        Check("bongos collection root and filtered rows are restored on off", () => {
+            var f = new Fixture(false);
+            f.Inventory._bongosCollection.PassSearch = false;
+            f.Build();
+            Assert(!f.Rows[13].gameObject.activeSelf && !f.Rows[14].gameObject.activeSelf,
+                "filtered bongos rows stay hidden through adoption");
+            f.Unlock.Disable();
+            Assert(!f.Rows[13].gameObject.activeSelf && !f.Rows[14].gameObject.activeSelf &&
+                !f.Inventory._bongosCollection._collectionRoot.gameObject.activeSelf,
+                "empty bongos root hidden on off");
+        });
         Check("exchange/trash reject virtual action and preserve owned native dispatch", () => {
             var f = new Fixture(true);
             int writes = FakePrefs.Writes;
             ItemExchange.Instance.IsVisible = true;
-            foreach (int id in new[] {2, 4, 5, 6})f.Click(id);
+            foreach (int id in new[] {2, 4, 5, 6, 14})f.Click(id);
             Assert(f.Visuals.Selects == 0 && f.TempCount == 0 && f.Themes.Previewed == null &&
                 FakePrefs.Writes == writes, "exchange blocks virtual");
             f.Click(1);
@@ -355,6 +401,7 @@ class UnlockSessionTests {
             f.Click(4);
             f.Click(5);
             f.Click(6);
+            f.Click(14);
             int writes = FakePrefs.Writes;
             f.Unlock.Disable();
             f.Unlock.Disable();
@@ -369,7 +416,8 @@ class UnlockSessionTests {
                     Assert(!pair.Value.gameObject.activeSelf && pair.Value._preview.activeSelf,
                         "native unowned visuals restored");
             }
-            Assert(Heathen.SteamworksIntegration.LobbyData.Current.MyHat == 1, "owned lobby baseline restored");
+            Assert(Heathen.SteamworksIntegration.LobbyData.Current.MyHat == 1 &&
+                Heathen.SteamworksIntegration.LobbyData.Current.MyBongos == 13, "owned lobby baseline restored");
         });
         Check("partial construction cancellation restores adopted rows without deleting any", () => {
             var f = new Fixture(false);

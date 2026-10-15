@@ -167,21 +167,21 @@ public sealed class CatInventory {
     public bool IsInitialized = true;
 
     public ItemCollection _hatsCollection = new ItemCollection(), _skinsCollection = new ItemCollection(),
-        _emoteCollection = new ItemCollection(), _consumableCollection = new ItemCollection(),
-        _uiThemeCollection = new ItemCollection();
+        _bongosCollection = new ItemCollection(), _emoteCollection = new ItemCollection(),
+        _consumableCollection = new ItemCollection(), _uiThemeCollection = new ItemCollection();
 
     public int Refreshes;
 
     public InventoryItem Add(SteamItemRuntime item) {
         var collection = item.ItemSlot == "hat" ? _hatsCollection : item.ItemSlot == "skin" ?
-            _skinsCollection : item.ItemSlot == "emote" ? _emoteCollection : item.ItemSlot == "consumable" ?
-            _consumableCollection : _uiThemeCollection;
+            _skinsCollection : item.ItemSlot == "bongos" ? _bongosCollection : item.ItemSlot == "emote" ?
+            _emoteCollection : item.ItemSlot == "consumable" ? _consumableCollection : _uiThemeCollection;
         var row = new InventoryItem(item, collection);
         collection._collectionItems.Add(row);
         return row;
     }
 
-    public void SetSeparatorVisibility() { Refreshes++; }
+    public void UpdateSectionVisibility() { Refreshes++; }
 }
 
 public sealed class ItemExchange {
