@@ -30,7 +30,6 @@ static class DiagnosticSession {
         };
     }
 
-    // The control protocol is line-delimited, so encode the selected directory before handing it to the runtime.
     internal static string Handshake() {
         return "LOG|" + Diag.Session + "|" + (int)Diag.Level + "|" +
             Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Folder));

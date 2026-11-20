@@ -4,11 +4,8 @@ using System.Reflection;
 using AutoCat.Diagnostics;
 
 static class EmbeddedRuntime {
-    // Mono loads the embedded assembly from a file, while AutoCat stays a single-file download.
-    // A running game cannot reload an assembly with the same name, so restart Bongo Cat after
-    // changing the runtime. Release IDs follow the version digits (1.0.1 -> 101, 1.1.1 -> 111).
-    // build.ps1 reads the value from this line and rejects one that does not match the version.
-    internal const string RuntimeId = "121";
+    // Bump with every release; build.ps1 rejects a value that does not match the version.
+    internal const string RuntimeId = "130";
     internal static string FileName {
         get { return "autocat.runtime." + RuntimeId + ".dll"; }
     }
@@ -44,7 +41,6 @@ static class EmbeddedRuntime {
         }
         return target;
     }
-    // Older runtimes a running Bongo Cat still has loaded can't be deleted; they're skipped and retried on a later launch.
     internal static int RemoveStale(string dir, string current, out int inUse) {
         int removed = 0;
         inUse = 0;

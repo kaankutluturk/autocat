@@ -11,8 +11,8 @@ namespace AutocatBridge {
 public sealed partial class Worker {
     DiagnosticLog diagnostics = new DiagnosticLog("game");
     string diagnosticFolder, diagnosticSession = "";
-    float diagnosticAt, traceAt, repairFlushAt;
-    int diagnosticEmotes, diagnosticPolls, giftRequestId, repairCosmetics, repairEmotes;
+    float diagnosticAt, traceAt;
+    int diagnosticEmotes, diagnosticPolls, giftRequestId;
     int lastReadiness = -1;
     string lastDiagnosticProblem = "";
     bool diagnosticThrottled;
@@ -21,7 +21,7 @@ public sealed partial class Worker {
         Diag.Current = diagnostics;
         diagnostics.Write(LogLevel.Info, "Runtime", "initialized",
             "runtime=" + Assembly.GetExecutingAssembly().GetName().Name.Replace("autocat.runtime.", "") +
-            " source=Assembly-CSharp; update=per-frame; statePollMs=100; nativeTickMs=500");
+            " source=Assembly-CSharp; update=per-frame; statePollMs=100");
     }
 
     void ConfigureDiagnostics(string id, int level, string folderToken) {
@@ -49,43 +49,6 @@ public sealed partial class Worker {
         diagnostics.Values(LogLevel.Info, "Session", "linked",
             "runtime=" + Assembly.GetExecutingAssembly().GetName().Name.Replace("autocat.runtime.", "") +
             " pid={0} level={1} source=game-component", GetCurrentProcessId(), level);
-    }
-
-    void NativeLog(string message) {
-        LogLevel level = message.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0 ? LogLevel.Error :
-            message.IndexOf("slow:", StringComparison.Ordinal) >= 0 ? LogLevel.Debug : LogLevel.Info;
-        string action = "state";
-        if (message.StartsWith("tick slow:"))action = "maintenance.duration";
-        else if (message.StartsWith("maintain reapplied")) {
-            action = "state.reapplied";
-            repairCosmetics++;
-            if (repairFlushAt == 0)repairFlushAt = Time.realtimeSinceStartup + 1;
-        } else if (message.StartsWith("wheel entry healed")) {
-            action = "emote.restored";
-            repairEmotes++;
-            if (repairFlushAt == 0)repairFlushAt = Time.realtimeSinceStartup + 1;
-        } else if (message.StartsWith("restored"))action = "visuals.restored";
-        else if (message.StartsWith("acquired items:"))action = "ownership.reconciled";
-        else if (message.StartsWith("native entries added="))action = "activation.applied";
-        else if (message.StartsWith("native unlock disabled"))action = "disabled.restored";
-        else if (message.StartsWith("selection requested"))action = "selection.requested";
-        else if (message.StartsWith("preview id="))action = "selection.applied";
-        else if (message.StartsWith("cleared slot="))action = "selection.cleared";
-        if ((action == "state.reapplied" || action == "emote.restored") && !diagnostics.Enabled(LogLevel.Debug))
-            return;
-        if (diagnostics.Enabled(level)) {
-            if (level >= LogLevel.Warn)diagnostics.Limited(level, "UnlockAll", action, message);
-            else diagnostics.Write(level, "UnlockAll", action, message);
-        }
-    }
-
-    void FlushRepairDiagnostics(bool force) {
-        if (repairCosmetics == 0 && repairEmotes == 0)return;
-        if (!force && Time.realtimeSinceStartup < repairFlushAt)return;
-        diagnostics.Values(LogLevel.Info, "UnlockAll", "repair.summary",
-            "cosmetics={0} emotes={1}; authoritative refresh healed", repairCosmetics, repairEmotes);
-        repairCosmetics = repairEmotes = 0;
-        repairFlushAt = 0;
     }
 
     void DiagnosticState(bool normalReady, bool emoteReady, int lifetime) {
@@ -128,7 +91,6 @@ public sealed partial class Worker {
                     (long)(framePeak * 1000000));
                 traceAt = now + 1;
             }
-            FlushRepairDiagnostics(false);
             PollExchangeDiagnostic(now);
         } catch (Exception e) {
             diagnostics.Fault("Diagnostics", "observation.failed", e);

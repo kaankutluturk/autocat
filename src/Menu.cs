@@ -27,7 +27,6 @@ sealed class MainForm : Form {
     readonly MenuTabs tabs = new MenuTabs();
     readonly Label footer = new Label();
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer {Interval = 1000};
-    // Short enough that a quick tap is seen and a pause feels immediate; the Windows timer runs at about 15.6 ms.
     readonly System.Windows.Forms.Timer inputTimer = new System.Windows.Forms.Timer {Interval = 15};
     readonly EventWaitHandle reopen;
     MicroButton start, emoteStart;
@@ -39,11 +38,13 @@ sealed class MainForm : Form {
     NoticeLink updateLink;
     bool updateStarted;
     Thread updateThread;
+    ReleaseManifest signedUpdate;
+    string stagedUpdate;
+    bool updateBusy;
     int footerWidth;
 
     ITray tray;
 
-    // Only a launch creates the notification area icon; inspection forms get one only from a test's own factory.
     internal static TrayFactory TrayFor(bool inspect, TrayFactory given) {
         if (given != null || inspect)return given;
         return (toggle, unload) => new NotifyTray(toggle, unload);
@@ -111,10 +112,13 @@ sealed class MainForm : Form {
         if (Skin.Scale != 1f)Scale(new SizeF(Skin.Scale, Skin.Scale));
         footerWidth = footer.Width;
         bridge = new BridgeClient(inspection ? "" : EmbeddedRuntime.Extract(), taps);
+        bridge.Tokens.Seed(settings.LastTokenGrant);
         Apply();
         if (!inspection) {
-            taps.Start();
-            bridge.Start();
+            if (!UpdateApply.IsHealthStartup) {
+                taps.Start();
+                bridge.Start();
+            }
             timer.Tick += (s, e) => Tick();
             timer.Start();
             inputTimer.Tick += (s, e) => bindings.Poll();
@@ -142,7 +146,23 @@ sealed class MainForm : Form {
             diagnostics.Items.Add("copy diagnostic summary", null,
                 (s, e) => CopyDiagnostic(DiagnosticSession.Summary()));
             footer.ContextMenuStrip = diagnostics;
-            Shown += (s, e) => BeginUpdateCheck();
+            Shown += (s, e) => {
+                UpdateApply.AcknowledgeStartup();
+                if (UpdateApply.IsHealthStartup) {
+                    var activation = new Thread(() => {
+                        bool committed = UpdateApply.WaitForStartupCommit();
+                        try {
+                            BeginInvoke(new Action(() => {
+                                if (closing || IsDisposed)return;
+                                if (committed) { taps.Start(); bridge.Start(); }
+                                else Notice("Restart AutoCat to resume game attachment");
+                            }));
+                        } catch (InvalidOperationException) { }
+                    }) {IsBackground = true, Name = "update-activation"};
+                    activation.Start();
+                }
+                BeginUpdateCheck();
+            };
             LogConfiguration();
             Diag.Write(LogLevel.Info, "Menu", "opened", "startup visible; automation paused");
         }
@@ -177,8 +197,6 @@ sealed class MainForm : Form {
         }
     }
 
-    // The taskbar shows an app window while it is visible and none once it is hidden; without a taskbar the menu
-    // stays a tool window, which never has a button. Inspection forms never get one.
     bool taskbarWindow;
     AppIcon smallIcon, largeIcon;
     internal Func<IntPtr, bool> setForeground = Native.SetForegroundWindow;
@@ -206,7 +224,6 @@ sealed class MainForm : Form {
         if (taskbarWindow)ApplyIcons();
     }
 
-    // The window icon follows the primary display's icon sizes, so the taskbar and Alt+Tab never scale a small image up.
     void ApplyIcons() {
         var small = AppIcon.Load(AppIcon.SmallSize);
         var large = AppIcon.Load(AppIcon.LargeSize);
@@ -235,8 +252,6 @@ sealed class MainForm : Form {
 
     internal static bool IsMaximize(long command) { return (command & 0xFFF0) == SC_MAXIMIZE; }
 
-    // Anything else that minimizes or maximizes the window, such as the shell minimizing every window, is undone
-    // after the fact: the menu is hidden like the binding hides it, or put back at its size.
     void Settle() {
         if (closing || IsDisposed || !IsHandleCreated)return;
         if (Native.IsZoomed(Handle))Native.ShowWindow(Handle, Native.SW_RESTORE);
@@ -245,12 +260,8 @@ sealed class MainForm : Form {
         HideMenu(false);
     }
     float dpiScale = EntryPoint.StartupDpiScale;
-    // After a resolution switch Windows may change the monitor's scaling late, or without ever sending this window
-    // WM_DPICHANGED, so a resolution change is applied immediately and once more after things settle.
     readonly System.Windows.Forms.Timer displaySettle = new System.Windows.Forms.Timer {Interval = 1000};
 
-    // Monitor bounds come from the native API: WinForms' Screen list is cached and can still report the
-    // previous resolution while a display change is being delivered.
     protected override void WndProc(ref Message m) {
         if (m.Msg == WM_SYSCOMMAND && IsMinimize((long)m.WParam)) {
             if (!closing)HideMenu();
@@ -324,8 +335,6 @@ sealed class MainForm : Form {
         if (tray != null)tray.DisplayChanged();
     }
 
-    // Re-scaling an already-scaled tree drifts from rounding, so every DPI change rebuilds the
-    // whole control tree fresh from the fixed 480x274 baseline instead, same as the startup scale.
     void RebuildUI(float newScale) {
         int selected = tabs.Selected;
         for (int i = 0; i < pages.Length; i++) {
@@ -362,15 +371,12 @@ sealed class MainForm : Form {
         tabs.Selected = selected;
         tabs.Invalidate();
         UpdateDanger();
-        shownNormalTokens = shownEmoteTokens = long.MinValue;
         UpdateText();
         Invalidate(true);
         Diag.Write(LogLevel.Info, "Menu", "rescaled",
             "scale=" + newScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    // Inspection-mode forms (--ui-test/--render) never receive real WM_DPICHANGED; this exercises
-    // the same rebuild path directly.
     internal void SimulateDpiChange(float scale) { RebuildUI(scale); }
 
     internal void SimulateDisplayChange(float dpi, Size screen, Rectangle work) {
@@ -554,17 +560,13 @@ sealed class MainForm : Form {
         Check(ex, "auto-slot + exchange", 24, () => settings.Exchange, v => settings.Exchange = v);
     }
 
-    long shownNormalTokens = long.MinValue, shownEmoteTokens = long.MinValue;
     Label tokenCounts;
-    bool unlockAll;
-
     void BuildExperimental() {
-        var gifts = Group(2, "insta gift", 0, 218);
+        var gifts = Group(2, "insta gift", 0, 448);
         Check(gifts, "enabled", 24, () => settings.InstaGift, v => settings.InstaGift = v);
-        tokenCounts = Label(gifts, "normal: —\nemote: —", 14, 58, 190, 36);
-        var unlock = Group(2, "unlock all", 230, 218);
-        Check(unlock, "enabled", 24, () => unlockAll, v => unlockAll = v);
-        Label(unlock, "temporarily unlocks cosmetics\nand emotes", 14, 58, 190, 36);
+        Button(gifts, "open normal gift", 14, 52, 205, () => bridge.OpenGift(false));
+        Button(gifts, "open emote gift", 229, 52, 205, () => bridge.OpenGift(true));
+        tokenCounts = Label(gifts, "normal: —\nemote: —\nnext token: —", 14, 88, 190, 54);
     }
 
     void BuildMisc() {
@@ -651,8 +653,6 @@ sealed class MainForm : Form {
         QueueSave();
     }
 
-    // Changes persist on their own shortly after the last edit (as well as on hide/close), so a crash or forced kill
-    // loses at most a couple of seconds of changes; dragging a slider still produces a single write.
     readonly System.Windows.Forms.Timer saveTimer = new System.Windows.Forms.Timer {Interval = 2000};
 
     void QueueSave() {
@@ -744,13 +744,12 @@ sealed class MainForm : Form {
         else ShowMenu(fromTray);
     }
 
-    // The same close as the unload button: the menu closes, which stops automation and unloads the runtime.
     void Unload() { Close(); }
 
     void ToggleRunning() {
         running = !running;
         Diag.Write(LogLevel.Info, "Automation", running ? "resume.requested" : "pause.requested",
-            "Insta Gift and Unlock All stay as toggled");
+            "Insta Gift stays as toggled");
         Sync();
         UpdateText();
     }
@@ -765,11 +764,7 @@ sealed class MainForm : Form {
         QueueSave();
     }
 
-    // Runs at launch and on every change, so what the runtime is sent always follows the checkboxes and the
-    // pause state. Paused means nothing new is clicked, emoted, claimed or exchanged; only Insta Gift, which
-    // submits nothing itself, stays armed. Requests already in flight finish in the game component.
     void Apply() {
-        bridge.UnlockAll = unlockAll;
         bridge.InstaGift = settings.InstaGift;
         bridge.Emoting = running && settings.Emoting;
         bridge.EmoteRate = settings.EmoteRate;
@@ -781,6 +776,11 @@ sealed class MainForm : Form {
 
     void Tick() {
         if (reopen != null && reopen.WaitOne(0))ShowMenu();
+        long grant = bridge.Tokens.LastGrant;
+        if (grant != settings.LastTokenGrant) {
+            settings.LastTokenGrant = grant;
+            QueueSave();
+        }
         if (Visible)UpdateText();
         else UpdateTray();
     }
@@ -788,12 +788,11 @@ sealed class MainForm : Form {
     void UpdateText() {
         var s = bridge == null ? new GameState() : bridge.State;
         string connection = bridge == null ? "waiting for game" : bridge.Connection;
-        if (tokenCounts != null && pages[2].Visible &&
-                (s.NormalTokens != shownNormalTokens || s.EmoteTokens != shownEmoteTokens)) {
-            shownNormalTokens = s.NormalTokens;
-            shownEmoteTokens = s.EmoteTokens;
+        if (tokenCounts != null && pages[2].Visible) {
             string counts = "normal: " + (s.NormalTokens < 0 ? "—" : s.NormalTokens.ToString("N0")) +
-                "\nemote: " + (s.EmoteTokens < 0 ? "—" : s.EmoteTokens.ToString("N0"));
+                "\nemote: " + (s.EmoteTokens < 0 ? "—" : s.EmoteTokens.ToString("N0")) +
+                "\nnext token: " + (bridge == null || s.NormalTokens < 0 ? "—" :
+                    bridge.Tokens.Next(s.NormalTokens, s.EmoteTokens, DateTime.UtcNow));
             if (tokenCounts.Text != counts)tokenCounts.Text = counts;
         }
         string buttonText = running ? "pause automation" : "resume automation";
@@ -820,8 +819,6 @@ sealed class MainForm : Form {
         UpdateTray();
     }
 
-    // The update notice takes the right end of the footer line and shows only while the status text still fits
-    // to its left, so it never shortens or hides what the footer reports.
     void LayoutFooter() {
         if (footerWidth <= 0)return;
         footer.Width = footerWidth;
@@ -843,6 +840,28 @@ sealed class MainForm : Form {
     internal void BeginUpdateCheck(Version running = null) {
         if (updateStarted || closing || (inspection && UpdateCheck.Fetch == UpdateCheck.Network))return;
         updateStarted = true;
+        if (!inspection && UpdateCheck.Fetch == UpdateCheck.Network && ReleaseTrust.Ready) {
+            updateThread = new Thread(() => {
+                try {
+                    try {
+                        UpdateApply.PruneBackup(Application.ExecutablePath, DateTime.UtcNow);
+                    } catch (Exception e) {
+                        Diag.Fault("Update", "backup_prune.failed", e);
+                    }
+                    var release = UpdateService.Check();
+                    if (release == null)return;
+                    BeginInvoke(new Action(() => {
+                        if (closing || IsDisposed)return;
+                        signedUpdate = release;
+                        ShowUpdate(release.Version);
+                    }));
+                } catch (Exception e) {
+                    Diag.Fault("Update", "signed_check.failed", e);
+                }
+            }) {IsBackground = true, Name = "signed-update-check"};
+            updateThread.Start();
+            return;
+        }
         updateThread = UpdateCheck.Start(UpdateCheck.Fetch,
             running ?? System.Reflection.Assembly.GetExecutingAssembly().GetName().Version, (outcome, latest) => {
                 try {
@@ -866,18 +885,69 @@ sealed class MainForm : Form {
             Controls.Add(updateLink);
             updateLink.ContextMenuStrip = footer.ContextMenuStrip;
         }
-        updateLink.Text = "update available: " + latest.ToString(3);
+        SetUpdateText("update available: " + latest.ToString(3));
+    }
+
+    void SetUpdateText(string text) {
+        updateLink.Text = text;
         LayoutFooter();
     }
 
-    // Always the fixed release page; the reply decides only whether the notice appears and which version it names.
     void OpenReleasePage() {
+        if (signedUpdate != null && !inspection) {
+            InstallSignedUpdate();
+            return;
+        }
         try {
             UpdateCheck.Open(UpdateCheck.ReleasePage);
         } catch (Exception e) {
             Diag.Fault("Update", "open.failed", e);
             Notice("Could not open the release page");
         }
+    }
+
+    void InstallSignedUpdate() {
+        if (updateBusy || closing)return;
+        if (stagedUpdate != null) {
+            try {
+                if (UpdateService.GameRunning()) {
+                    MessageBox.Show(this, "Close Bongo Cat, then click install and restart again.", "AutoCat update");
+                    return;
+                }
+                UpdateApply.Start(stagedUpdate, Application.ExecutablePath);
+                Close();
+            } catch (Exception e) {
+                Diag.Fault("Update", "install.failed", e);
+                stagedUpdate = null;
+                SetUpdateText("retry update download");
+                MessageBox.Show(this, "The update could not be installed. Your current copy is still available.", "AutoCat update");
+            }
+            return;
+        }
+        updateBusy = true;
+        SetUpdateText("downloading update...");
+        updateThread = new Thread(() => {
+            try {
+                string stage = UpdateService.Stage(signedUpdate, () => closing);
+                BeginInvoke(new Action(() => {
+                    if (closing || IsDisposed)return;
+                    stagedUpdate = stage;
+                    updateBusy = false;
+                    SetUpdateText("install and restart");
+                }));
+            } catch (Exception e) {
+                Diag.Fault("Update", "download.failed", e);
+                try {
+                    BeginInvoke(new Action(() => {
+                        updateBusy = false;
+                        if (closing || IsDisposed)return;
+                        SetUpdateText("retry update download");
+                        Notice("Could not verify or download the update");
+                    }));
+                } catch (InvalidOperationException) { }
+            }
+        }) {IsBackground = true, Name = "update-download"};
+        updateThread.Start();
     }
 
     void Notice(string message) {
@@ -892,8 +962,7 @@ sealed class MainForm : Form {
         rates.Request(false);
         UpdateDanger();
         running = false;
-        unlockAll = false;
-        settings = new Settings();
+        settings = new Settings {LastTokenGrant = bridge.Tokens.LastGrant};
         ApplyBindings();
         ApplyAccent(Skin.DefaultAccent);
         Sync();
@@ -916,7 +985,6 @@ sealed class MainForm : Form {
         if (giveFocusBack && Native.IsWindow(previous))Native.SetForegroundWindow(previous);
     }
 
-    // From the notification area the window in front is the taskbar, which is no window to give focus back to.
     void ShowMenu(bool fromTray = false) {
         UpdateText();
         var front = Native.GetForegroundWindow();
@@ -974,7 +1042,7 @@ sealed class MainForm : Form {
     void LogConfiguration() {
         if (inspection)return;
         int flags = (settings.Clicker ? 1 : 0) | (settings.Emoting ? 2 : 0) | (settings.Gifts ? 4 : 0) |
-            (settings.Exchange ? 8 : 0) | (settings.InstaGift ? 16 : 0) | (unlockAll ? 32 : 0) |
+            (settings.Exchange ? 8 : 0) | (settings.InstaGift ? 16 : 0) |
             (settings.ExtremeRates ? 64 : 0) | (running ? 128 : 0) | (settings.PawPass ? 256 : 0);
         if (flags != lastFlags) {
             string[] names = {
@@ -983,13 +1051,13 @@ sealed class MainForm : Form {
                 "AutoCollect",
                 "Exchange",
                 "InstaGift",
-                "UnlockAll",
+                null,
                 "ExtremeRates",
                 "Automation",
                 "PawPass"
             };
             for (int i = 0; i < names.Length; i++)
-                if (lastFlags < 0 || ((lastFlags ^ flags) & (1 << i)) != 0)
+                if (names[i] != null && (lastFlags < 0 || ((lastFlags ^ flags) & (1 << i)) != 0))
                     Diag.Write(LogLevel.Info, names[i],
                         (flags & (1 << i)) != 0 ? "configured.on" : "configured.off",
                         "source=menu; game application recorded separately");
@@ -1077,8 +1145,6 @@ sealed class MainForm : Form {
         return -1;
     }
 
-    // The wordmark is two runs of text; at every scale it must come out pixel for pixel as one run would, in the
-    // middle of its block, with its ink inside the block.
     static void VerifyLogo() {
         float before = Skin.Scale;
         try {
@@ -1135,8 +1201,7 @@ sealed class MainForm : Form {
         }
     }
 
-    // The wordmark as the menu paints it: in the middle of the space left of the tabs at every scale, kept there
-    // by a live rescale, in the logo colors, clear of the frame.
+    // The wordmark is centred in the space left of the tabs at every scale, clear of the frame.
     static void VerifyLogoInMenu() {
         float before = Skin.Scale;
         try {
@@ -1200,8 +1265,6 @@ sealed class MainForm : Form {
             }
     }
 
-    // What Windows needs to give the menu a taskbar button, and that the other forms get none. The window is
-    // created but never shown, so a test run adds nothing to the taskbar.
     static void VerifyTaskbar() {
         float scaleBefore = Skin.Scale;
         try {
@@ -1257,8 +1320,6 @@ sealed class MainForm : Form {
         };
     }
 
-    // Every way the menu is shown and hidden ends in the same place, with the menu in front and still on top, and
-    // the notification area menu names what it does next.
     static void VerifyMenuRoutes() {
         var input = new FakeInput();
         var trays = new List<FakeTray>();
@@ -1353,8 +1414,6 @@ sealed class MainForm : Form {
         }
     }
 
-    // The shell minimizes windows by calling ShowWindow, not by the system command the taskbar button sends. Any
-    // such minimize is a hide, and the menu comes back normal, topmost and at its place; it can never be maximized.
     static void VerifyMinimize() {
         var input = new FakeInput();
         var trays = new List<FakeTray>();
@@ -1619,7 +1678,6 @@ sealed class MainForm : Form {
         return form;
     }
 
-    // The update notice as a launch drives it, with the network read replaced; nothing here reaches the network.
     static void VerifyUpdateNotice() {
         const string tag = "https://github.com/kaankutluturk/autocat/releases/tag/";
         const string page = "https://github.com/kaankutluturk/autocat/releases/latest";
@@ -2015,8 +2073,6 @@ sealed class MainForm : Form {
                     throw new Exception("Capture: a conflicting binding must be rejected");
                 form.Hide();
             }
-            // The key that chooses a binding is still down when the choice lands; it must be released and pressed
-            // again before it can fire, whether or not it was already watched.
             Action<string, int, int, int, bool, string, bool> choose = (step, editor, menuKey, key, ctrl, bound,
                     resumes) => {
                 var ours = new FakeInput();
@@ -2236,8 +2292,6 @@ sealed class MainForm : Form {
         }
     }
 
-    // The PawPass toggle: off unless checked, sent only while running, its status in the footer, and room for
-    // it in the gifts group at every scale.
     static void VerifyPawPass() {
         Func<MainForm, string, MicroCheck> find = (form, text) => {
             foreach (Control group in form.pages[1].Controls)
@@ -2250,17 +2304,29 @@ sealed class MainForm : Form {
             form.Show();
             form.SelectPage(1);
             float start = Skin.Scale;
-            if (form.settings.PawPass || form.bridge.PawPass || form.bridge.Command() != "SET|0|0|0|0|10|0|0|0")
+            if (form.settings.PawPass || form.bridge.PawPass || form.bridge.Command() != "SET|0|0|0|0|10|0|0|0|0")
                 throw new Exception("PawPass toggle: must be off by default");
             Call(find(form, "auto claim pawpass"), "OnKeyDown", new KeyEventArgs(Keys.Space));
-            if (!form.settings.PawPass || form.bridge.Command() != "SET|0|0|0|0|10|0|0|0")
+            if (!form.settings.PawPass || form.bridge.Command() != "SET|0|0|0|0|10|0|0|0|0")
                 throw new Exception("PawPass toggle: checked while paused must not be sent");
             form.ToggleRunning();
-            if (form.bridge.Command() != "SET|1|0|0|0|10|0|0|1")
+            if (form.bridge.Command() != "SET|1|0|0|0|10|0|0|1|0")
                 throw new Exception("PawPass toggle: resume must send it, sent " + form.bridge.Command());
             form.ToggleRunning();
-            if (form.bridge.Command() != "SET|0|0|0|0|10|0|0|0")
+            if (form.bridge.Command() != "SET|0|0|0|0|10|0|0|0|0")
                 throw new Exception("PawPass toggle: pause must withdraw it");
+            foreach (var press in new[] {"open emote gift", "open normal gift", "open normal gift"}) {
+                MicroButton button = null;
+                foreach (Control group in form.pages[2].Controls)
+                    foreach (Control c in group.Controls)
+                        if (c is MicroButton && c.Text == press)button = (MicroButton)c;
+                if (button == null)throw new Exception("Gift buttons: no \"" + press + "\" on the experimental tab");
+                Call(button, "OnClick", EventArgs.Empty);
+            }
+            // Emote 3, normal 4, normal 6.
+            if (form.bridge.Command() != "SET|0|0|0|0|10|0|0|0|6")
+                throw new Exception("Gift buttons: each press must change the request, sent " + form.bridge.Command());
+            form.bridge.GiftRequest = 0;
             string line = "OK|100|101|10|1|0|0|12|2|3|4||5|6|1|16.7|20|20|6|12";
             form.bridge.Connection = "attached";
             form.bridge.State = GameState.Parse(line + "|" +
@@ -2305,7 +2371,7 @@ sealed class MainForm : Form {
             }
             form.SimulateDpiChange(start);
             form.ResetSettings();
-            if (form.settings.PawPass || form.bridge.PawPass || form.bridge.Command() != "SET|0|0|0|0|10|0|0|0")
+            if (form.settings.PawPass || form.bridge.PawPass || form.bridge.Command() != "SET|0|0|0|0|10|0|0|0|0")
                 throw new Exception("PawPass toggle: reset must turn it off");
         }
     }
@@ -2338,20 +2404,21 @@ sealed class MainForm : Form {
                     throw new Exception("Pause model, " + step + ": sent " + launched.bridge.Command());
             };
             if (!launched.settings.Gifts || !launched.settings.Exchange || !launched.settings.PawPass ||
-                    launched.running || launched.unlockAll)throw new Exception("Pause model: saved toggles must be restored paused");
-            sent("launch", "SET|0|0|0|0|7|1|0|0", false);
+                    launched.running)
+                throw new Exception("Pause model: saved toggles must be restored paused");
+            sent("launch", "SET|0|0|0|0|7|1|0|0|0", false);
             launched.ToggleRunning();
-            sent("resume", "SET|1|1|1|1|7|1|0|1", true);
+            sent("resume", "SET|1|1|1|1|7|1|0|1|0", true);
             launched.ToggleRunning();
-            sent("pause", "SET|0|0|0|0|7|1|0|0", false);
+            sent("pause", "SET|0|0|0|0|7|1|0|0|0", false);
             launched.ToggleRunning();
             launched.ResetSettings();
-            sent("reset", "SET|0|0|0|0|10|0|0|0", false);
+            sent("reset", "SET|0|0|0|0|10|0|0|0|0", false);
         }
         using (var closed = new MainForm(true, new Settings {Gifts = true, PawPass = true})) {
             closed.ToggleRunning();
             closed.Shutdown();
-            if (closed.bridge.Command() != "SET|0|0|0|0|10|0|0|0")
+            if (closed.bridge.Command() != "SET|0|0|0|0|10|0|0|0|0")
                 throw new Exception("Pause model, shutdown: sent " + closed.bridge.Command());
         }
         if (has(pages[4], "save settings") || !has(pages[4], "reset settings"))
@@ -2491,8 +2558,8 @@ sealed class MainForm : Form {
 static class EntryPoint {
     [STAThread]
     static void Main(string[] args) {
-        // Per-Monitor-V2 first (needed for live WM_DPICHANGED); older Windows falls back to the legacy
-        // system-aware call, correct at launch but not live.
+        UpdateApply.TrustedPublicKeyXml = ReleaseTrust.PublicKeyXml;
+        if (UpdateApply.TryRun(args))return;
         bool perMonitor = false;
         try {
             perMonitor =
@@ -2529,8 +2596,6 @@ static class EntryPoint {
                     try {
                         form.Verify(args[1]);
                     } catch (Exception e) {
-                        // As --self-test does: a failing check leaves a FAIL line and a non-zero exit code instead of
-                        // an unhandled exception that ends the process without any output.
                         File.WriteAllText(args[1], "FAIL: " + e);
                         Environment.ExitCode = 1;
                     }
@@ -2560,9 +2625,6 @@ static class EntryPoint {
         }
     }
 
-    // Resolution and DPI/scaling are independent in Windows: a 4K display at 100% scaling still
-    // reports a normal 96 DPI. 1920x1080 is the "1x" reference; whichever signal asks for more
-    // scale wins, so raised Windows scaling and a high-res display don't stack and double-scale.
     internal static string DpiMode = "unaware";
     internal static float StartupDpiScale = 1f;
 

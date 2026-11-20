@@ -16,8 +16,7 @@
 
 AutoCat is a compact Windows utility for Bongo Cat. It automates clicking and
 emoting, collects and stacks gifts, claims PawPass rewards you have already
-earned, exchanges duplicate cosmetics and emotes, and can temporarily use
-supported unowned cosmetics, UI Themes, and emotes during a session. AutoCat
+earned, and exchanges duplicate cosmetics and emotes. AutoCat
 calls Bongo Cat's own functions directly instead of simulating mouse or
 keyboard input, and it never replaces or modifies any installed Bongo Cat
 file. The menu sizes itself to your display, and its accent color is yours to
@@ -32,9 +31,14 @@ not; AutoCat attaches automatically either way.
 
 ## Updating
 
-Close AutoCat and Bongo Cat, replace your `autocat.exe` with the new one, and
-launch it. Your settings carry over, and files left behind by older versions
-are cleaned up automatically.
+Starting with the updater-enabled build, AutoCat checks for signed updates when
+it opens. Click the update notice to download; when it is ready, close Bongo Cat
+and click **install and restart**. AutoCat replaces its own file, keeps the
+previous version for a day in case it is needed, and starts paused. Your settings carry over.
+
+Older copies need one manual upgrade: close both apps and replace `autocat.exe`.
+Future updates use the same stable download channel. Protected or linked folders
+may require a manual replacement; AutoCat does not request administrator access.
 
 ## First launch and controls
 
@@ -42,7 +46,6 @@ AutoCat starts paused. While it is paused it does not click, emote, collect
 gifts, claim PawPass rewards or exchange anything. Insta Gift is the one
 exception: if it is checked, it stays armed while paused. Your checkboxes are
 remembered between launches, so pressing resume starts everything you left on.
-Unlock All is never remembered and is off every time AutoCat starts.
 
 Insert shows or hides the menu. Home pauses or resumes automation. Both are
 rebindable in the Misc tab: click a binding, then press the key (with or
@@ -61,7 +64,7 @@ second copy.
 |---|---|
 | Auto Clicker | Auto clicking (1 to 200/sec) and auto emoting (1 to 100/sec, reusable equipped emotes only, no consumables) toggle independently and share the one pause/resume button. |
 | Automation | Auto Collect submits eligible normal and emote gift claims. Auto Claim PawPass claims PawPass rewards you have already earned. Auto-slot + Exchange trades real eligible duplicate cosmetics and emotes and never touches a slot you filled manually. All three wait while AutoCat is paused. |
-| Experimental | Insta Gift and Unlock All, both described below. |
+| Experimental | Insta Gift, buttons that open one normal or emote gift right away, the current normal and emote token balances, and an estimate of the next token. |
 | Theme | Pick your own accent color with a color wheel or a hex code. |
 | Misc | Key bindings, reset settings, unload, and Extreme Rates. |
 
@@ -74,11 +77,9 @@ back to back and stack the resulting chests, instead of checking in every
 few minutes. This automates existing eligibility. It doesn't manipulate
 tokens.
 
-**Unlock All.** Temporarily makes supported eligible unowned hats, skins, UI
-Themes, and emotes available through the normal in-game inventory during the
-current session. It does not change Steam ownership or inventory quantities,
-and never removes anything you legitimately own. Turning Unlock All off or
-unloading AutoCat restores normal availability and your legitimate equipment.
+To pick which kind you open, use **open normal gift** or **open emote
+gift** under Insta Gift instead. Each press skips that gift's timer and claims
+one chest with a token you already have, even while AutoCat is paused.
 
 ## Display and appearance
 
@@ -145,10 +146,8 @@ them from the repository folder after building:
 ```powershell
 bin\autocat.exe --self-test C:\full\path\self-test.txt
 bin\autocat.exe --ui-test C:\full\path\ui-test.txt
-experiments\Test-RuntimeLogic.ps1
 experiments\diagnostics\Test.ps1
 experiments\diagnostics\Test-WorkerDiagnostics.ps1
-experiments\Test-UnlockSession.ps1
 experiments\Test-PawPass.ps1
 experiments\Test-Packaging.ps1
 ```

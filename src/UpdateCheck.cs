@@ -2,9 +2,6 @@ using System;
 using System.Net;
 using System.Threading;
 
-// One GET to the fixed releases/latest address, once per launch. GitHub answers with a redirect to the tag page of the
-// newest release; only the Location header is read, it is reduced to three small integers, and nothing else of the
-// reply is kept, logged, opened or run. Nothing is downloaded or installed.
 static class UpdateCheck {
     internal const string ReleasePage = "https://github.com/kaankutluturk/autocat/releases/latest";
     const string TagPrefix = "https://github.com/kaankutluturk/autocat/releases/tag/";
@@ -28,8 +25,7 @@ static class UpdateCheck {
     internal static int TimeoutMs = 5000;
     static volatile HttpWebRequest pending;
 
-    // TLS 1.2 is the one place the protocol is chosen: the default of a .NET 4.0 program is a protocol GitHub no longer
-    // accepts. Certificate validation is left alone, and this program makes no other HTTPS request.
+    // TLS 1.2 is set explicitly: the .NET 4.0 default is a protocol GitHub no longer accepts.
     internal const SecurityProtocolType Tls12 = (SecurityProtocolType)3072;
 
     internal static void UseTls12() {
@@ -41,8 +37,6 @@ static class UpdateCheck {
         return Send(new Uri(ReleasePage));
     }
 
-    // A plain GET with nothing added: no proxy (so no proxy discovery), credentials, cookies, user agent, other
-    // headers or redirects. If the connection drops before a reply the HTTP stack may repeat the request once.
     internal static HttpWebRequest Create(Uri address) {
         var request = (HttpWebRequest)WebRequest.Create(address);
         request.Method = "GET";
@@ -78,7 +72,6 @@ static class UpdateCheck {
         }
     }
 
-    // The newest release's version, or null unless the reply is a redirect to exactly <TagPrefix>vMAJOR.MINOR.PATCH.
     internal static Version Parse(Reply reply) {
         int status = reply.Status;
         if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308)return null;

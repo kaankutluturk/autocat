@@ -9,8 +9,6 @@ using System.Text.RegularExpressions;
 namespace AutoCat.Diagnostics {
 public enum LogLevel { Trace, Debug, Info, Warn, Error }
 
-// Shared by the external menu and the Unity component. Disk/mutex/formatting work
-// lives exclusively on this worker; producers only filter, copy scalars and queue.
 public sealed class DiagnosticLog : IDisposable {
     struct Event {
         public long Ticks, Sequence, A, B, C, D;
@@ -94,8 +92,6 @@ public sealed class DiagnosticLog : IDisposable {
         Limited(LogLevel.Error, subsystem, action, real.Message, real);
     }
 
-    // First occurrence is always queued. Repeated identical conditions are counted;
-    // periodic worker summaries survive even if the condition never recurs again.
     public void Limited(LogLevel level, string subsystem, string action, string message,
             Exception error = null) {
         LimitEvent(level, subsystem, action, message, false, 0, 0, 0, 0, error);
@@ -194,8 +190,6 @@ public sealed class DiagnosticLog : IDisposable {
         if (level >= LogLevel.Warn)Monitor.Pulse(gate);
     }
 
-    // A path is swallowed to the end of its line. It ends earlier only when the rest of the line is one of a
-    // few fixed message endings, because any looser rule can stop inside a path and reveal part of it.
     const string PathStart = @"(?:[a-z]:[\\/]|\\\\)", PathBody = @"[^\r\n""<>|]*";
     static readonly Regex paths = new Regex("(?i)(?:" +
         @"(?<=')" + PathStart + PathBody +

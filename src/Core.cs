@@ -13,6 +13,7 @@ public class Settings {
     public int EmoteRate = 10;
     public int AccentColor = 0xE0A189;
     public bool PawPass;
+    public long LastTokenGrant;
 
     public void Validate() {
         EmoteRate = Math.Max(1,
@@ -23,6 +24,7 @@ public class Settings {
         MenuModifiers &= 15;
         PauseModifiers &= 15;
         AccentColor &= 0xFFFFFF;
+        if (LastTokenGrant < 0 || LastTokenGrant > DateTime.UtcNow.AddDays(1).Ticks)LastTokenGrant = 0;
     }
 
     public static Settings Read(string path) {
@@ -205,7 +207,7 @@ sealed class TapEngine : IDisposable {
                     lastSummary = 0;
                     lastSent = Interlocked.Read(ref Sent);
                     while (!closed && p.IsConnected) {
-                        Thread.Sleep((int)(100 / Math.Max(0.2f, PerformanceScale)));
+                        Thread.Sleep(100);
                         long now = timer.ElapsedMilliseconds;
                         int count = 0;
                         lock (gate) {
@@ -288,6 +290,47 @@ sealed class TapEngine : IDisposable {
     }
 }
 
+// Steam grants a normal and an emote token on the game's once-a-minute request once 30 minutes have passed
+// since the previous grant, also across restarts. The next grant is not reported, so it is estimated.
+sealed class TokenClock {
+    public static readonly TimeSpan Interval = TimeSpan.FromMinutes(30);
+    static readonly long ZeroHold = TimeSpan.FromSeconds(5).Ticks;
+    long lastGrant;
+    long priorNormal = -1, priorEmote = -1, zeroSince;
+
+    public long LastGrant { get { return Interlocked.Read(ref lastGrant); } }
+
+    public void Seed(long ticks) {
+        if (ticks > 0)Interlocked.CompareExchange(ref lastGrant, ticks, 0);
+    }
+
+    public void Observe(long normal, long emote, DateTime now) {
+        if (normal < 0 || emote < 0)return;
+        // Inventory refreshes read 0/0 for under a second.
+        if (normal == 0 && emote == 0 && (priorNormal > 0 || priorEmote > 0)) {
+            if (zeroSince == 0)zeroSince = now.Ticks;
+            if (now.Ticks - zeroSince < ZeroHold)return;
+        }
+        zeroSince = 0;
+        long dn = normal - priorNormal, de = emote - priorEmote;
+        if (priorNormal >= 0 && priorEmote >= 0 && dn >= 0 && dn <= 1 && de >= 0 && de <= 1 && dn + de > 0)
+            Interlocked.Exchange(ref lastGrant, now.Ticks);
+        priorNormal = normal;
+        priorEmote = emote;
+    }
+
+    public string Next(long normal, long emote, DateTime now) {
+        if (normal >= 10 && emote >= 10)return "full";
+        long last = LastGrant;
+        // No grant seen yet: Steam grants at most 30 min after the previous one (31 min with the game's
+        // once-a-minute request), so that is a true upper bound until the first grant gives an exact time.
+        if (last == 0)return "within 31 min";
+        var left = new DateTime(last, DateTimeKind.Utc) + Interval - now;
+        if (left > TimeSpan.Zero)return "~" + (int)left.TotalMinutes + ":" + left.Seconds.ToString("00");
+        return "any moment";
+    }
+}
+
 sealed class GameState {
     public long NormalTokens = -1, EmoteTokens = -1;
     public float PerformanceScale = 1;
@@ -344,12 +387,10 @@ sealed class BridgeClient : IDisposable {
     volatile bool closed;
     NamedPipeClientStream pipe;
     readonly object gate = new object();
-    public volatile string CosmeticCatalog = "";
-    public volatile bool CatalogRequested;
-    int previewPending = int.MinValue;
-    public void PreviewCosmetic(int id) { Interlocked.Exchange(ref previewPending, id); }
-    public volatile bool UnlockAll;
     public volatile bool Running, Gifts, Exchange, Emoting, InstaGift, PawPass;
+    // Press count * 2, plus 1 for the emote shop.
+    public volatile int GiftRequest;
+    public readonly TokenClock Tokens = new TokenClock();
     public volatile int EmoteRate = 1;
     public volatile GameState State = new GameState();
     public volatile string Connection = "waiting for game";
@@ -359,10 +400,14 @@ sealed class BridgeClient : IDisposable {
         taps = engine;
     }
 
+    public void OpenGift(bool emote) {
+        lock (gate)GiftRequest = (((GiftRequest >> 1) + 1) << 1) | (emote ? 1 : 0);
+    }
+
     internal string Command() {
         return "SET|" + (Running ? "1" : "0") + "|" + (Gifts ? "1" : "0") + "|" + (Exchange ? "1" : "0") +
-            "|" + (Emoting ? "1" : "0") + "|" + EmoteRate + "|" + (InstaGift ? "1" : "0") + "|" +
-            (UnlockAll ? "1" : "0") + "|" + (PawPass ? "1" : "0");
+            "|" + (Emoting ? "1" : "0") + "|" + EmoteRate + "|" + (InstaGift ? "1" : "0") + "|0|" +
+            (PawPass ? "1" : "0") + "|" + GiftRequest;
     }
 
     public void Start() {
@@ -556,19 +601,10 @@ sealed class BridgeClient : IDisposable {
                                         "Runtime did not accept shared diagnostic session");
                             }
                             while (!closed && p.IsConnected) {
-                                if (CatalogRequested) {
-                                    writer.WriteLine("CATALOG");
-                                    CosmeticCatalog = ReadLineBounded(reader);
-                                    CatalogRequested = false;
-                                }
-                                int choice = Interlocked.Exchange(ref previewPending, int.MinValue);
-                                if (choice != int.MinValue) {
-                                    writer.WriteLine("PREVIEW|" + choice);
-                                    ReadLineBounded(reader);
-                                }
                                 writer.WriteLine(Command());
                                 var next = GameState.Parse(ReadLineBounded(reader));
                                 State = next;
+                                Tokens.Observe(next.NormalTokens, next.EmoteTokens, DateTime.UtcNow);
                                 LogState(next, ref previous, ref summaryAt);
                                 taps.PerformanceScale = next.PerformanceScale;
                                 if (next.Ready)taps.Observe(next.Total, next.Lifetime);
@@ -602,8 +638,6 @@ sealed class BridgeClient : IDisposable {
                         Diag.Fault("Connection", "disconnected", e);
                         Connection = e.Message;
                     }
-                    CosmeticCatalog = "";
-                    Interlocked.Exchange(ref previewPending, int.MinValue);
                     State = new GameState {Message = Connection};
                     taps.ResetGuard();
                     taps.PerformanceScale = 0;

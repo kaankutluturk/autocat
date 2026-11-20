@@ -18,8 +18,6 @@ static class Native {
     public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr h);
-    // Per-Monitor-V2 (Windows 10 1703+) is required to receive WM_DPICHANGED; plain SetProcessDPIAware
-    // only scales once at process start and Windows silently bitmap-stretches the window instead.
     [DllImport("user32.dll")]
     public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
     public static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
@@ -44,7 +42,6 @@ static class Native {
     public static extern bool GetMonitorInfo(IntPtr m, ref MonitorInfo info);
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr h);
-    // Effective DPI of the monitor itself; unlike GetDpiForWindow it doesn't wait for the window to receive WM_DPICHANGED.
     [DllImport("shcore.dll")]
     public static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
     public const uint MONITOR_DEFAULTTONEAREST = 2, MONITOR_DEFAULTTOPRIMARY = 1;

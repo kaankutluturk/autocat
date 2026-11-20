@@ -137,7 +137,6 @@ sealed class BindingMonitor : IDisposable {
 
     static bool IsWheel(int key) { return key >= 256 && key <= 259; }
 
-    // Modifiers are polled as their left and right keys, so pressing the second shift is a press of its own.
     static int[] Sources(int key) {
         if (key == 16)return new[] {160, 161};
         if (key == 17)return new[] {162, 163};
@@ -152,8 +151,6 @@ sealed class BindingMonitor : IDisposable {
         return input.IsDown(key);
     }
 
-    // Starts watching these bindings; a key already down, watched before or not, is not a press. False if a
-    // wheel hook is needed and could not be installed.
     public bool Configure(int menuKey, int pauseKey) {
         first = menuKey;
         second = pauseKey;
@@ -288,8 +285,6 @@ sealed class BindingEditor : Control, IMessageFilter {
         }));
     }
 
-    // While choosing, the menu's own keyboard, mouse button and wheel messages are the input, and the menu
-    // consumes them so they do nothing else.
     public bool PreFilterMessage(ref Message m) {
         FilterCalls++;
         if (active != this)return false;

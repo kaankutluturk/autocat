@@ -64,6 +64,9 @@ public sealed partial class Worker : MonoBehaviour {
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     static extern uint GetCurrentProcessId();
     internal volatile bool running, gifts, exchange, closed, emoting, instaGift, pawPass;
+    // 0 none, 1 normal shop, 2 emote shop.
+    internal volatile int giftButton;
+    float giftButtonSince = -1;
     volatile string state = "WAIT";
     string problem = "";
     string lastDiagnosticCommand = "";
@@ -73,7 +76,8 @@ public sealed partial class Worker : MonoBehaviour {
     long lastContact = DateTime.UtcNow.Ticks;
     float nextRead, nextGift, nextExchange;
     double nextEmote;
-    float lastFrame, windowTime, windowWorst, frameAverage, framePeak, tapScale = 1, emoteBudget = 20;
+    const float tapScale = 1; // Tap ingress is independent of rendering FPS.
+    float lastFrame, windowTime, windowWorst, frameAverage, framePeak, emoteBudget = 20;
     int windowFrames, slowWindows;
     volatile int emoteRate = 1;
     int claims, trades, emoteCalls, emoteTotal = -1;
@@ -81,15 +85,6 @@ public sealed partial class Worker : MonoBehaviour {
     object[] ownedItems;
     long[] ownedAmounts;
     int nextGroup;
-    NativeUnlock nativeUnlock;
-    volatile bool wantUnlock;
-    bool unlockFailed;
-    float nextNative, nextPreview;
-    int previewFailures;
-    CosmeticPreview preview;
-    volatile bool catalogRequested;
-    volatile string previewCatalog = "CATALOG|";
-    int previewSelection = (-2147483648);
     object pendingGift;
     long pendingTokens;
     bool pendingEmote, nextGiftEmote;
@@ -135,8 +130,6 @@ public sealed partial class Worker : MonoBehaviour {
     int Number(object obj, string name) { return Convert.ToInt32(Field(obj, name)); }
     bool Flag(object obj, string name) { return (bool)Field(obj, name); }
 
-    // First inventory tab of an exchange group, read from the game's own tab lists. Tab indices shift when the
-    // game adds a tab, and a stale index silently selects the wrong category, so there is no fixed fallback.
     int ExchangeTab(object ex, int group) {
         string name = group == 0 ? "CosmeticTabs" : "EmoteTabs";
         var tabs = Static(ex.GetType(), name) as int[];
@@ -151,7 +144,6 @@ public sealed partial class Worker : MonoBehaviour {
         }
         if (!running || !emoting)emoteBudget = emoteRate;
         if (!running) {
-            tapScale = 1;
             slowWindows = 0;
         }
         float nowFrame = Time.realtimeSinceStartup;
@@ -165,16 +157,13 @@ public sealed partial class Worker : MonoBehaviour {
         if (windowTime >= 0.5f) {
             frameAverage = windowTime / Math.Max(1, windowFrames);
             framePeak = windowWorst;
-            // A narrow degrade/recover band sits inside ordinary frame-time jitter and would ratchet emoteBudget to the floor under normal play; this band only throttles on genuinely bad frame pacing and keeps recovery reachable.
             if (frameAverage > 0.028f)slowWindows++;
             else slowWindows = 0;
             if (slowWindows >= 3 || frameAverage > 0.045f) {
                 emoteBudget = Math.Max(0.25f, emoteBudget * 0.65f);
-                tapScale = Math.Max(0.05f, tapScale * 0.7f);
             } else if (frameAverage < 0.022f && framePeak < 0.04f) {
                 if (running && emoting)
                     emoteBudget = Math.Min(emoteRate, emoteBudget + Math.Max(2, emoteRate * 0.1f));
-                tapScale = Math.Min(1, tapScale + 0.05f);
             }
             windowTime = 0;
             windowFrames = 0;
@@ -231,8 +220,6 @@ public sealed partial class Worker : MonoBehaviour {
                             EmoteDiagnostic("pruned dead wheel entries=" + deadKeys.Count.ToString());
                         }
                     }
-                    if (frameEmote == null && nativeUnlock != null && wantUnlock)
-                        frameEmote = nativeUnlock.TemporaryReusable();
                 }
                 if (frameEmote == null)problem = "Emotes: equip a non-consumable emote";
                 else {
@@ -277,49 +264,6 @@ public sealed partial class Worker : MonoBehaviour {
             normalTokens = Tokens(false);
             emoteTokens = Tokens(true);
             try {
-                if ((catalogRequested || wantUnlock && !unlockFailed) && preview == null &&
-                        Time.realtimeSinceStartup >= nextPreview)
-                    StartPreview();
-                if (!wantUnlock) {
-                    unlockFailed = false;
-                    previewFailures = 0;
-                    nextPreview = 0;
-                    if (nativeUnlock != null) {
-                        var ending = nativeUnlock;
-                        nativeUnlock = null;
-                        try {
-                            ending.Disable();
-                        } catch (Exception e) {
-                            diagnostics.Fault("UnlockAll", "disable.failed", e);
-                            problem = "Unlock all: " + (e.InnerException ?? e).Message;
-                        }
-                    }
-                } else if (!unlockFailed && preview != null) {
-                    try {
-                        if (nativeUnlock == null)nativeUnlock = new NativeUnlock(game, preview, NativeLog);
-                        if (Time.realtimeSinceStartup >= nextNative) {
-                            nativeUnlock.Tick();
-                            if (nativeUnlock.Error != "")problem = "Unlock all: " + nativeUnlock.Error;
-                            else if (problem.StartsWith("Unlock all:"))problem = "";
-                            nextNative = Time.realtimeSinceStartup + 0.5f;
-                        }
-                    } catch {
-                        unlockFailed = true;
-                        throw;
-                    }
-                }
-                int choice = Interlocked.Exchange(ref previewSelection, (-2147483648));
-                if (choice != (-2147483648) && preview != null) {
-                    if (choice < 0)preview.Disable();
-                    else preview.Select(choice);
-                    problem = preview.Active ? "Local cosmetic preview" : "";
-                }
-            } catch (Exception error) {
-                diagnostics.Fault("UnlockAll", "lifecycle.failed", error);
-                problem = "Preview: " + (error.InnerException ?? error).Message;
-                catalogRequested = false;
-            }
-            try {
                 if (pendingGift != null) {
                     long tokens = pendingEmote ? emoteTokens : normalTokens;
                     if (tokens < pendingTokens) {
@@ -337,6 +281,7 @@ public sealed partial class Worker : MonoBehaviour {
                         problem = "Gift not confirmed; retry delayed";
                     }
                 }
+                if (giftButton != 0)GiftButton(normal, emote);
                 if ((gifts || instaGift) && pendingGift == null && Time.realtimeSinceStartup >= nextGift &&
                         !(bool)Static(game.GetType("Steam.ChestExchanger", true, false), "IsExchanging")) {
                     nextGift = Time.realtimeSinceStartup + 2;
@@ -491,38 +436,6 @@ public sealed partial class Worker : MonoBehaviour {
         }
     }
 
-    void StartPreview() {
-        try {
-            if (previewFailures == 0) {
-                string folder =
-                    Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
-                        "autocat-data");
-                Directory.CreateDirectory(folder);
-                string backupValue = PlayerPrefs.GetString("EQUIPPED_ITEMS_3", "<absent>");
-                diagnostics.Values(LogLevel.Info, "Persistence", "equipmentBackup.requested",
-                    "source=PlayerPrefs key=EQUIPPED_ITEMS_3 chars={0}; previous backup may be replaced; contents excluded",
-                    backupValue.Length);
-                File.WriteAllText(Path.Combine(folder, "cosmetic-equipped-backup.txt"), backupValue);
-                diagnostics.Write(LogLevel.Info, "Persistence", "equipmentBackup.written",
-                    "source=local-backup-file; write returned; no game ownership changed; later persistence not inferred");
-            }
-            preview = new CosmeticPreview(game,
-                () => PlayerPrefs.GetString("EQUIPPED_ITEMS_3", "<absent>"), NativeLog, (slot, id) => {
-                    if (nativeUnlock != null)nativeUnlock.BroadcastSlot(slot, id);
-                });
-            previewCatalog = preview.Catalog;
-        } catch (Exception e) {
-            // Only the game still starting up is waited for; anything else stops Unlock All until it is toggled again.
-            if (!PreviewNotReadyException.Retry(e, ++previewFailures)) {
-                unlockFailed = true;
-                throw;
-            }
-            nextPreview = Time.realtimeSinceStartup + 0.5f;
-            diagnostics.Limited(LogLevel.Warn, "UnlockAll", "preview.not_ready",
-                "Cat or item catalog not ready; preview setup will retry");
-        }
-    }
-
     void PruneDestroyedInventoryCallbacks() {
         var inventory = Static(game.GetType("BongoCat.CatInventory", true, false), "Instance");
         int removed = 0;
@@ -566,6 +479,52 @@ public sealed partial class Worker : MonoBehaviour {
         UnityEngine.Object.DontDestroyOnLoad(go);
         var observation = ObserveExchangeStart(routine, items, possible);
         go.AddComponent<ExchangeRunner>().Begin(routine, () => ObserveExchangeEnd(observation));
+    }
+
+    // Skips the shop timer, then buys one chest once the game marks it ready.
+    void GiftButton(object normal, object emote) {
+        bool isEmote = giftButton == 2;
+        string kind = isEmote ? "emote" : "normal";
+        var shop = isEmote ? emote : normal;
+        var item = Field(shop, "_shopItem");
+        long tokens = isEmote ? emoteTokens : normalTokens;
+        float now = Time.realtimeSinceStartup;
+        if (giftButtonSince < 0) {
+            giftButtonSince = now;
+            if (problem.StartsWith("Gift button:"))problem = "";
+        }
+        if (tokens <= 0 || now - giftButtonSince > 5) {
+            string failure = tokens <= 0 ? "no " + kind + " gift tokens" : kind + " gift not ready, try again";
+            diagnostics.Write(LogLevel.Warn, "Gifts", "button.failed", failure);
+            problem = "Gift button: " + failure;
+            ClearGiftButton();
+            return;
+        }
+        if (pendingGift != null || PawPassPending || Flag(shop, "_openingChest") || Flag(item, "_waitingForServer") ||
+                (bool)Static(game.GetType("Steam.ChestExchanger", true, false), "IsExchanging"))return;
+        if (Number(shop, "StockRefreshTimeLeft") > 0) {
+            cache.Field(shop.GetType(), "StockRefreshTimeLeft").SetValue(shop, 0);
+            diagnostics.Values(LogLevel.Info, "Gifts", "button.timer.applied", "emote={0}", isEmote ? 1 : 0);
+            return;
+        }
+        if (!(bool)Call(shop, "get_CanGetChest"))return;
+        pendingGift = shop;
+        pendingEmote = isEmote;
+        pendingTokens = tokens;
+        giftSubmitted = now;
+        giftRequestId++;
+        ClearGiftButton();
+        diagnostics.Values(LogLevel.Info, "Gifts", "request.started",
+            "request={0} emote={1} tokensBefore={2} source=button", giftRequestId, isEmote ? 1 : 0, tokens);
+        Call(item, "Buy");
+        diagnostics.Values(LogLevel.Info, "Gifts", "request.submitted",
+            "request={0}; native Buy returned; outcome pending", giftRequestId);
+        claims++;
+    }
+
+    void ClearGiftButton() {
+        giftButton = 0;
+        giftButtonSince = -1;
     }
 
     bool PawPassPending { get { return pawPassClaim != null && pawPassClaim.Pending; } }
@@ -620,6 +579,8 @@ public sealed partial class Worker : MonoBehaviour {
                     using (var reader = new StreamReader(p, Encoding.UTF8, false, 1024, true))
                         using (var writer = new StreamWriter(p, new UTF8Encoding(false), 1024, true)) {
                             writer.AutoFlush = true;
+                            int lastGiftCode = 0;
+                            bool giftCodeSeen = false;
                             while (!closed && p.IsConnected) {
                                 var line = reader.ReadLine();
                                 if (line == null)break;
@@ -638,20 +599,6 @@ public sealed partial class Worker : MonoBehaviour {
                                     }
                                     continue;
                                 }
-                                if (line == "CATALOG") {
-                                    diagnostics.Write(LogLevel.Debug, "UnlockAll", "catalog.requested",
-                                        "Existing catalog response");
-                                    catalogRequested = true;
-                                    writer.WriteLine(previewCatalog);
-                                    continue;
-                                }
-                                if (line.StartsWith("PREVIEW|")) {
-                                    int choice;
-                                    if (int.TryParse(line.Substring(8), out choice))
-                                        Interlocked.Exchange(ref previewSelection, choice);
-                                    writer.WriteLine("QUEUED");
-                                    continue;
-                                }
                                 if (line == "UNLOAD") {
                                     diagnostics.Write(LogLevel.Info, "Runtime", "unload.requested",
                                         "Control command");
@@ -662,24 +609,35 @@ public sealed partial class Worker : MonoBehaviour {
                                 }
                                 bool changedDiagnosticCommand = line != lastDiagnosticCommand;
                                 var values = line.Split('|');
-                                if ((values.Length == 8 || values.Length == 9) && values[0] == "SET") {
+                                if (values.Length >= 8 && values.Length <= 10 && values[0] == "SET") {
                                     running = values[1] == "1";
                                     gifts = values[2] == "1";
                                     exchange = values[3] == "1";
                                     emoting = values[4] == "1";
                                     instaGift = values[6] == "1";
-                                    wantUnlock = values[7] == "1";
+                                    // Field 7 is reserved for compatibility.
                                     pawPass = values.Length > 8 && values[8] == "1";
+                                    int giftCode;
+                                    if (values.Length > 9 && int.TryParse(values[9], out giftCode)) {
+                                        // A new connection adopts the current code instead of replaying a press.
+                                        if (giftCodeSeen && giftCode != lastGiftCode) {
+                                            giftButton = (giftCode & 1) == 1 ? 2 : 1;
+                                            diagnostics.Values(LogLevel.Info, "Gifts", "button.received",
+                                                "emote={0}", giftCode & 1);
+                                        }
+                                        lastGiftCode = giftCode;
+                                        giftCodeSeen = true;
+                                    }
                                     if (!running || !pawPass)pawPassReleased = true;
                                     int parsed;
                                     if (int.TryParse(values[5], out parsed))
                                         emoteRate = Math.Max(1, Math.Min(100000000, parsed));
                                     if (changedDiagnosticCommand) {
                                         diagnostics.Values(LogLevel.Info, "Configuration", "applied",
-                                            "running={0} featureFlags={1} emoteRate={2}; flags: collect=1 exchange=2 emote=4 insta=8 unlock=16 pawpass=32",
+                                            "running={0} featureFlags={1} emoteRate={2}; flags: collect=1 exchange=2 emote=4 insta=8 pawpass=32",
                                             running ? 1 : 0,
                                             (gifts ? 1 : 0) | (exchange ? 2 : 0) | (emoting ? 4 : 0) |
-                                            (instaGift ? 8 : 0) | (wantUnlock ? 16 : 0) | (pawPass ? 32 : 0),
+                                            (instaGift ? 8 : 0) | (pawPass ? 32 : 0),
                                             emoteRate);
                                         lastDiagnosticCommand = line;
                                     }
@@ -706,52 +664,9 @@ public sealed partial class Worker : MonoBehaviour {
         }
     }
 
-    void LateUpdate() {
-        if (nativeUnlock != null && wantUnlock && preview != null) {
-            try {
-                nativeUnlock.Advance();
-                nativeUnlock.MaintainTheme();
-                preview.Maintain();
-            } catch (Exception e) {
-                diagnostics.Fault("UnlockAll", "maintenance.failed", e);
-                problem = "Unlock all: " + (e.InnerException ?? e).Message;
-                unlockFailed = true;
-                if (nativeUnlock != null) {
-                    var failed = nativeUnlock;
-                    nativeUnlock = null;
-                    try {
-                        failed.Disable();
-                    } catch (Exception cleanup) {
-                        diagnostics.Fault("UnlockAll", "maintenance.cleanup.failed", cleanup);
-                    }
-                }
-            }
-        }
-    }
-
     void OnDestroy() {
-        diagnostics.Write(LogLevel.Info, "Runtime", "cleanup.started", "Restoring temporary state");
+        diagnostics.Write(LogLevel.Info, "Runtime", "cleanup.started", "Closing runtime connection");
         bool clean = true;
-        try {
-            if (nativeUnlock != null)nativeUnlock.Disable();
-            diagnostics.Write(LogLevel.Info, "Runtime", "cleanup.native",
-                "Native temporary state cleanup returned");
-        } catch (Exception e) {
-            clean = false;
-            diagnostics.Fault("Runtime", "cleanup.native.failed", e);
-        } finally {
-            nativeUnlock = null;
-        }
-        try {
-            if (preview != null)preview.Disable();
-            diagnostics.Write(LogLevel.Info, "Runtime", "cleanup.renderer", "Renderer cleanup returned");
-        } catch (Exception e) {
-            clean = false;
-            diagnostics.Fault("Runtime", "cleanup.renderer.failed", e);
-        } finally {
-            preview = null;
-        }
-        FlushRepairDiagnostics(true);
         foreach (var o in exchangeObservations)
             diagnostics.Values(LogLevel.Warn, "Exchange", "shutdown.unverified",
                 "request={0}; outcome still pending", o.Id);

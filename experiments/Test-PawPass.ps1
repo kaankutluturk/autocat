@@ -5,7 +5,7 @@ $OutputDirectory=(Resolve-Path -LiteralPath $OutputDirectory).Path
 $SourceRoot=(Resolve-Path -LiteralPath $SourceRoot).Path
 $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 $fixtures=Join-Path $PSScriptRoot 'pawpass'
-$sources=@('bridge\Bridge.cs','bridge\PawPassClaim.cs','bridge\WorkerDiagnostics.cs','bridge\InventoryHandoff.cs','shared\Diagnostics.cs') | ForEach-Object { Join-Path $SourceRoot $_ }
+$sources=@('bridge\Bridge.cs','bridge\PawPassClaim.cs','bridge\WorkerDiagnostics.cs','shared\Diagnostics.cs') | ForEach-Object { Join-Path $SourceRoot $_ }
 # The unchanged game model first, then one model per changed or missing member.
 # The unchanged model again last, with the runtime compiled as a dry-run build.
 foreach($variant in @('','NO_PAWPASS','NO_ROW_CLAIM','ROWS_RENAMED','UNCLAIMED_CHANGED','DRYRUN')){

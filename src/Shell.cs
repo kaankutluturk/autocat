@@ -3,8 +3,6 @@ using System.Drawing;
 using System.Windows.Forms;
 using AutoCat;
 
-// The application icon at one exact size, read from the executable's own icon resource so that each size Windows
-// asks for is drawn from the matching image instead of a scaled copy.
 sealed class AppIcon : IDisposable {
     IntPtr handle;
     public readonly Icon Icon;
@@ -52,8 +50,6 @@ sealed class AppIcon : IDisposable {
     }
 }
 
-// What the notification area icon shows; the status is limited to the connection states the footer reports, so a
-// failure message never reaches a tooltip.
 static class TrayText {
     // Windows shows at most 63 characters of an icon's tooltip.
     public const int Limit = 63;
@@ -139,7 +135,6 @@ sealed class NotifyTray : ITray {
         }
     }
 
-    // Each size of the icon is read from the executable, so the notification area never has to scale one.
     void SetIcon() {
         var next = AppIcon.Load(AppIcon.SmallSize);
         icon.Icon = next != null ? next.Icon : SystemIcons.Application;

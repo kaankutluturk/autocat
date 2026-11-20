@@ -1,15 +1,13 @@
 using System;
 using System.Reflection;
 
-// There is deliberately no AssemblyVersion: the runtime is identified by its file name, and the loader opens it by path.
 [assembly: AssemblyTitle("AutoCat game component")]
 [assembly: AssemblyDescription("Game-side component of AutoCat, the Bongo Cat automation helper")]
 [assembly: AssemblyProduct("AutoCat")]
 [assembly: AssemblyCompany("AutoCat")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Kaan Kutluturk")]
-[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
-// The game's trimmed mscorlib does not define these. The compiler writes the file's version resource from them by name.
 namespace System.Reflection {
     [AttributeUsage(AttributeTargets.Assembly)]
     sealed class AssemblyTitleAttribute : Attribute {

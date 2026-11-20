@@ -14,30 +14,6 @@ using UnityEngine;
 using BongoCat.PawPass;
 #endif
 
-// Unlock All is not part of these tests; the game component only needs the types to exist.
-namespace AutocatBridge {
-public sealed class CosmeticPreview {
-    public CosmeticPreview(Assembly assembly, Func<string> saved, Action<string> logger,
-        Action<string, int> broadcaster) { }
-    public bool Active { get { return false; } }
-    public string Catalog { get { return "CATALOG|"; } }
-    public void Select(int id) { }
-    public void Disable() { }
-    public void Maintain() { }
-}
-
-public sealed class NativeUnlock {
-    public string Error = "";
-    public NativeUnlock(Assembly assembly, CosmeticPreview renderer, Action<string> logger) { }
-    public void Tick() { }
-    public void Advance() { }
-    public void MaintainTheme() { }
-    public void Disable() { }
-    public void BroadcastSlot(string slot, int id) { }
-    public object TemporaryReusable() { return null; }
-}
-}
-
 // Drives the real game component (Bridge.cs, PawPassClaim.cs) against the game model, one poll at a time.
 sealed class Rig : IDisposable {
     const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -270,6 +246,21 @@ static class PawPassTests {
         sourceRoot = Path.GetFullPath(args[0]);
         logFolder = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(logFolder);
+        Check("intentional low FPS and background pacing never reduce the tap scale", () => {
+            using (var rig = new Rig()) {
+                rig.Worker.running = true;
+                foreach (int fps in new[] {1, 5, 10, 15, 20, 30, 60, 144}) {
+                    for (int frame = 0; frame < fps * 12; frame++)rig.Poll(1f / fps);
+                    Assert(rig.State()[14] == "1", "tap scale at " + fps + " FPS");
+                }
+                rig.Worker.running = false;
+                rig.Poll();
+                rig.Worker.running = true;
+                for (int frame = 0; frame < 60; frame++)rig.Poll(0.2f);
+                Assert(rig.State()[14] == "1", "resume at 5 FPS");
+                Assert(FakeSteam.Submitted.Count == 0, "pacing check submits no inventory requests");
+            }
+        });
 #if VARIANT
         Check("a missing or changed game member disables only this feature, with one status and one log line",
             Unavailable);
@@ -1040,6 +1031,48 @@ static class PawPassTests {
                 Assert(rig.Claims() == 2 && rig.Status() == "", "nothing more while paused");
             }
         });
+        Check("gift buttons: one press skips that shop's timer and claims one chest while paused; no tokens or " +
+            "a chest that never gets ready gives up with a status", () => {
+            using (var rig = new Rig(4, 0)) {
+                FakeSteam.Items[1] = 3;
+                FakeSteam.Items[2] = 2;
+                rig.Normal.StockRefreshTimeLeft = rig.Emote.StockRefreshTimeLeft = 300;
+                rig.Worker.giftButton = 2;
+                rig.Poll();
+                Assert(rig.Emote.StockRefreshTimeLeft == 0 && rig.Normal.StockRefreshTimeLeft == 300,
+                    "only the emote timer is skipped");
+                Assert(Calls.Direct("ShopItem.Buy") == 0, "nothing bought before the game marks it ready");
+                rig.Emote.Ready = true;
+                rig.Poll();
+                Assert(Calls.Direct("ShopItem.Buy") == 1 && rig.Emote._shopItem._waitingForServer &&
+                    !rig.Normal._shopItem._waitingForServer && rig.Worker.giftButton == 0, "one emote chest claimed");
+                rig.Run(10);
+                Assert(Calls.Direct("ShopItem.Buy") == 1, "one press, one chest");
+            }
+            using (var rig = new Rig(4, 0)) {
+                FakeSteam.Items[1] = 0;
+                rig.Normal.Ready = true;
+                rig.Worker.giftButton = 1;
+                rig.Poll();
+                Assert(Calls.Direct("ShopItem.Buy") == 0 && rig.Worker.giftButton == 0 &&
+                    rig.Get<string>("problem") == "Gift button: no normal gift tokens", "no tokens: " +
+                    rig.Get<string>("problem"));
+            }
+            using (var rig = new Rig(4, 0)) {
+                FakeSteam.Items[1] = 1;
+                rig.Normal.StockRefreshTimeLeft = 300;
+                rig.Worker.giftButton = 1;
+                rig.Run(6);
+                Assert(Calls.Direct("ShopItem.Buy") == 0 && rig.Worker.giftButton == 0 &&
+                    rig.Get<string>("problem") == "Gift button: normal gift not ready, try again", "timeout: " +
+                    rig.Get<string>("problem"));
+                rig.Normal.Ready = true;
+                rig.Worker.giftButton = 1;
+                rig.Poll();
+                Assert(Calls.Direct("ShopItem.Buy") == 1 && rig.Get<string>("problem") == "",
+                    "a later press claims and clears the old status");
+            }
+        });
         Check("watchdog: four seconds without the menu clear the flag and nothing is claimed", () => {
             using (var rig = new Rig(4, 300)) {
                 rig.On();
@@ -1068,8 +1101,19 @@ static class PawPassTests {
                         send("SET|1|0|0|0|10|0|0|1");
                         send("SET|1|0|0|0|10|0|0");
                         Assert(rig.Worker.running && !rig.Worker.pawPass, "eight fields: off, rest applied");
-                        send("SET|0|0|0|0|10|0|0|1|1");
+                        send("SET|0|0|0|0|10|0|0|1|1|1");
                         Assert(rig.Worker.running && !rig.Worker.pawPass, "other shapes are ignored");
+                        // Tenth field: gift button code.
+                        send("SET|1|0|0|0|10|0|0|0|5");
+                        Assert(rig.Worker.giftButton == 0, "first gift code adopted, not a press");
+                        send("SET|1|0|0|0|10|0|0|0|7");
+                        Assert(rig.Worker.giftButton == 2, "odd code: emote shop");
+                        rig.Worker.giftButton = 0;
+                        send("SET|1|0|0|0|10|0|0|0|7");
+                        Assert(rig.Worker.giftButton == 0, "repeated code: no new press");
+                        send("SET|1|0|0|0|10|0|0|0|8");
+                        Assert(rig.Worker.giftButton == 1, "even code: normal shop");
+                        rig.Worker.giftButton = 0;
                         send("SET|1|0|0|0|10|0|0|1");
                         rig.Poll();
                         Assert(rig.Worker.pawPass && rig.Status() == "", "on again; state line carries the status");

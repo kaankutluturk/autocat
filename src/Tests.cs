@@ -48,12 +48,81 @@ static class Tests {
             using (var client = new BridgeClient("unused", null)) {
                 if (claiming.PawPass != "open pawpass once" || claiming.EmoteTokens != 12 || !claiming.Ready ||
                         tokens.PawPass != "" || state.PawPass != "" || new Settings().PawPass ||
-                        client.Command() != "SET|0|0|0|0|1|0|0|0")throw new Exception("PawPass protocol/defaults");
+                        client.Command() != "SET|0|0|0|0|1|0|0|0|0")throw new Exception("PawPass protocol/defaults");
+                client.OpenGift(true);
+                if (client.Command() != "SET|0|0|0|0|1|0|0|0|3")throw new Exception("Gift button: emote press code");
+                client.OpenGift(false);
+                if (client.Command() != "SET|0|0|0|0|1|0|0|0|4")throw new Exception("Gift button: normal press code");
+                var clock = new TokenClock();
+                var t0 = new DateTime(2026, 11, 20, 12, 0, 0, DateTimeKind.Utc);
+                clock.Observe(5, 5, t0);
+                if (clock.Next(5, 5, t0) != "within 31 min")throw new Exception("Token clock: no grant seen yet");
+                clock.Observe(0, 0, t0.AddSeconds(10));
+                clock.Observe(0, 0, t0.AddSeconds(16));
+                clock.Observe(6, 6, t0.AddSeconds(20));
+                if (clock.Next(6, 6, t0.AddSeconds(20)) != "within 31 min")throw new Exception("Token clock: a read glitch is not a grant");
+                clock.Observe(7, 7, t0.AddMinutes(1));
+                if (clock.Next(7, 7, t0.AddMinutes(1)) != "~30:00" || clock.Next(7, 7, t0.AddMinutes(14.5)) != "~16:30" ||
+                        clock.Next(7, 7, t0.AddMinutes(33)) != "any moment" || clock.Next(7, 7, t0.AddHours(9)) != "any moment" ||
+                        clock.Next(10, 10, t0.AddMinutes(2)) != "full")throw new Exception("Token clock: estimate");
+                clock.Observe(10, 7, t0.AddMinutes(30));
+                clock.Observe(10, 8, t0.AddMinutes(31));
+                if (clock.Next(10, 8, t0.AddMinutes(31)) != "~30:00")throw new Exception("Token clock: one capped balance");
+                var blips = new TokenClock();
+                blips.Observe(1, 1, t0);
+                blips.Observe(0, 0, t0.AddSeconds(0.5));
+                blips.Observe(1, 1, t0.AddSeconds(1));
+                if (blips.LastGrant != 0)throw new Exception("Token clock: a sub-second 0 read is not a grant");
+                blips.Observe(0, 0, t0.AddSeconds(2));
+                blips.Observe(0, 0, t0.AddSeconds(8));
+                blips.Observe(1, 1, t0.AddMinutes(5));
+                if (blips.LastGrant != t0.AddMinutes(5).Ticks)throw new Exception("Token clock: a lasting 0 then a grant");
+                blips.Seed(t0.Ticks);
+                var seeded = new TokenClock();
+                seeded.Seed(t0.Ticks);
+                if (blips.LastGrant != t0.AddMinutes(5).Ticks || seeded.Next(3, 3, t0.AddMinutes(10)) != "~20:00")
+                    throw new Exception("Token clock: seed from saved settings");
+                report.AppendLine("PASS: gift button press codes; next token estimate from the last one-step grant");
                 client.PawPass = true;
-                if (client.Command() != "SET|0|0|0|0|1|0|0|1")throw new Exception("PawPass command field");
+                if (client.Command() != "SET|0|0|0|0|1|0|0|1|4")throw new Exception("PawPass command field");
             }
             report.AppendLine(
                 "PASS: pawpass claim is off by default, is the ninth command field, and its status is read from the state line when present");
+            string pruneDir = Path.Combine(Path.GetTempPath(), "autocat-prune-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(pruneDir);
+            try {
+                string target = Path.GetFullPath(Path.Combine(pruneDir, "autocat.exe"));
+                string backup = target + ".autocat-backup.exe", receipt = target + ".autocat-backup.receipt";
+                Func<string> hash = () => {
+                    using (var sha = System.Security.Cryptography.SHA256.Create())
+                        return BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(backup))).Replace("-", "");
+                };
+                File.WriteAllText(target, "current");
+                File.WriteAllText(backup, "previous");
+                File.WriteAllText(receipt, target + "\n" + hash() + "\n");
+                var now = DateTime.UtcNow;
+                UpdateApply.PruneBackup(target, now);
+                if (!File.Exists(backup) || !File.Exists(receipt))throw new Exception("Backup prune: a fresh backup must stay");
+                File.WriteAllText(receipt, target + "\n" + new string('0', 64) + "\n");
+                File.SetLastWriteTimeUtc(receipt, now.AddDays(-2));
+                bool refused = false;
+                try {
+                    UpdateApply.PruneBackup(target, now);
+                } catch (IOException) {
+                    refused = true;
+                }
+                if (!refused || !File.Exists(backup))throw new Exception("Backup prune: an unrecognized backup must stay");
+                File.WriteAllText(receipt, target + "\n" + hash() + "\n");
+                File.SetLastWriteTimeUtc(receipt, now.AddDays(-2));
+                UpdateApply.PruneBackup(target, now);
+                if (File.Exists(backup) || File.Exists(receipt) || !File.Exists(target))
+                    throw new Exception("Backup prune: a day-old recognized backup must go");
+                UpdateApply.PruneBackup(target, now);
+                report.AppendLine("PASS: update backup is pruned a day after the update, only when its receipt matches");
+            } finally {
+                foreach (string file in Directory.GetFiles(pruneDir))File.Delete(file);
+                Directory.Delete(pruneDir);
+            }
             if (!BridgeClient.StartupNotReady(new Exception("Input hook not initialized")) ||
                     !BridgeClient.StartupNotReady(new Exception("Bongo Cat not initialized")) ||
                     BridgeClient.StartupNotReady(new Exception("Access denied")))
@@ -251,7 +320,7 @@ static class Tests {
             DiagnosticsHandoff();
             report.AppendLine("PASS: menu and runtime diagnostics handoff writes one shared session file");
             Transport();
-            report.AppendLine("PASS: connected tap delivery, pause, resume, stale-counter stop and unload");
+            report.AppendLine("PASS: connected tap delivery, scaled rate, pause, resume, unavailable/stale stop and unload");
             ReconnectWait();
             report.AppendLine("PASS: reconnect wait ends promptly once closing and still times out otherwise");
             UpdateReplies();
@@ -279,8 +348,6 @@ static class Tests {
         }
     }
 
-    // The file 1.1.1 wrote has no PawPass element; a file with elements a build does not know is what an older
-    // build sees when it reads a newer file.
     static void SettingsVersions() {
         const string head = "<?xml version=\"1.0\"?>\r\n<Settings xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
             "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n";
@@ -301,13 +368,15 @@ static class Tests {
         };
         try {
             var old = read(head + body + tail + "</Settings>");
-            if (old.PawPass)throw new Exception("Settings versions: a 1.1.1 file must leave PawPass off");
+            if (old.PawPass)
+                throw new Exception("Settings versions: a 1.1.1 file must leave PawPass off");
             old.PawPass = true;
             old.Save(path);
             string saved = File.ReadAllText(path);
-            if (!saved.StartsWith(head + body + tail + "  <PawPass>true</PawPass>\r\n</Settings>"))
+            if (!saved.StartsWith(head + body + tail + "  <PawPass>true</PawPass>\r\n  <LastTokenGrant>0</LastTokenGrant>\r\n</Settings>"))
                 throw new Exception("Settings versions: saved shape " + saved);
-            if (!read(saved).PawPass)throw new Exception("Settings versions: PawPass not kept");
+            if (!read(saved.Replace("</Settings>", "  <UnlockAll>true</UnlockAll>\r\n</Settings>")).PawPass)
+                throw new Exception("Settings versions: legacy setting interfered with PawPass");
             if (read(head + body + "  <Later>true</Later>\r\n" + tail + "  <Newer><A>1</A></Newer>\r\n</Settings>")
                     .PawPass)throw new Exception("Settings versions: unknown elements");
         } finally {
@@ -327,7 +396,6 @@ static class Tests {
         return version == null ? "-" : version.ToString();
     }
 
-    // What a reply may become: three small integers, and only for a redirect to the tag page of this project.
     static void UpdateReplies() {
         foreach (var valid in new[] {
             new[] {TagAddress + "v1.2.1", "1.2.1"},
@@ -566,7 +634,6 @@ static class Tests {
         return head.ToString();
     }
 
-    // The request as it leaves the program (against a local listener), and that it is bounded in time and size.
     static void UpdateRequest() {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -1070,6 +1137,27 @@ static class Tests {
                 engine.Enabled = true;
                 engine.Observe(100, 100);
                 if (ReadTap(p) == 0 && ReadTap(p) == 0)throw new Exception("Resume");
+                // A low transport scale changes the number of taps, not the cadence.
+                engine.Rate = 200;
+                engine.PerformanceScale = 0.05f;
+                engine.Observe(100, 100);
+                ReadTap(p); // Drain a possible frame computed before the change.
+                var scaledTimer = Stopwatch.StartNew();
+                int scaledTotal = 0;
+                for (int i = 0; i < 10; i++) {
+                    engine.Observe(100, 100);
+                    scaledTotal += ReadTap(p);
+                }
+                double scaledRate = scaledTotal / scaledTimer.Elapsed.TotalSeconds;
+                if (scaledRate < 7 || scaledRate > 14)
+                    throw new Exception("Scaled tap transport must deliver about 10/s, observed " +
+                        scaledRate.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+                engine.PerformanceScale = 0;
+                ReadTap(p);
+                if (ReadTap(p) != 0 || ReadTap(p) != 0)
+                    throw new Exception("Unavailable bridge scale must stop taps");
+                engine.PerformanceScale = 1;
+                engine.Observe(100, 100);
                 for (int i = 0; i < 25; i++)ReadTap(p);
                 if (ReadTap(p) != 0)throw new Exception("Stale counter must stop taps");
                 engine.Dispose();

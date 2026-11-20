@@ -4,9 +4,6 @@ using System.Reflection;
 using AutoCat.Diagnostics;
 
 namespace AutocatBridge {
-// Claims PawPass rewards the player has already earned, one at a time, through the game's own reward row.
-// Eligibility (pass joined, milestone reached, track owned, claim token held) is evaluated here, from the game's
-// own data, immediately before every claim.
 sealed class PawPassClaim {
     const BindingFlags Any =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
@@ -25,9 +22,6 @@ sealed class PawPassClaim {
 #else
     MethodInfo claim;
 #endif
-    // A milestone has to stay claimable, on the same row, for this long before it is claimed, and the wait
-    // starts over after any inventory request seen in the game. A claim the player started just before, whose
-    // token is still held until Steam answers, is then normally over; the evaluation runs every two seconds.
     const float Settle = 6;
     const int Attempts = 2;
     // How long a late answer to a timed-out request is still looked for: ten times the timeout.
@@ -43,8 +37,6 @@ sealed class PawPassClaim {
         public IList Free, Premium;
     }
 
-    // busy: a gift claim or duplicate exchange is in flight. A claim already started is followed to its end
-    // even when the feature is no longer active.
     public void Tick(bool active, bool busy, float now) {
         if (pending != null) {
             bool left = true;
@@ -84,8 +76,6 @@ sealed class PawPassClaim {
             return;
         }
         if (active && lapsed != null && now >= lapsedRead) {
-            // The answer to a request that timed out can still arrive. It is looked for only while the
-            // feature is active, for a limited time, and while the milestone is still where it was.
             lapsedRead = now + 2;
             bool left = true;
             try {
@@ -138,8 +128,6 @@ sealed class PawPassClaim {
 
     const string Halted = "pawpass claim failed; toggle to retry";
 
-    // The menu paused automation or switched the feature off. Only this lifts a stop; the component
-    // clearing its own flags when the menu goes silent does not.
     public void Release() {
         lapsed = null;
         if (unconfirmed < Attempts)return;
@@ -190,8 +178,6 @@ sealed class PawPassClaim {
         if (!Live(row) || !Object.ReferenceEquals(rowMilestone.GetValue(row), milestone))
             return "open pawpass once";
         if ((bool)revealing.GetValue(row))return "pawpass waiting";
-        // Read again right before the call: the selected pass, the milestone at this place, and that it is
-        // still earned, owned and unclaimed.
         if (!Object.ReferenceEquals(selectedPass.GetValue(manager), pass))return "";
         var fresh = Read(pass);
         if (!Claimable(fresh, premium, index) ||
@@ -239,8 +225,6 @@ sealed class PawPassClaim {
         return p;
     }
 
-    // The game's own rule for a claimable reward: the pass is joined, the milestone is reached, its track is
-    // owned, and its claim token is still held.
     bool Claimable(Progress p, bool premium, int index) {
         var list = premium ? p.Premium : p.Free;
         return p.Joined && index >= 0 && index < p.Reached && (premium ? p.HasPremium : p.HasFree) &&

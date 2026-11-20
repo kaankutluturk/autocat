@@ -20,7 +20,6 @@ static class Skin {
 
     public static float Scale = 1f;
 
-    // Called before any control exists, so text metrics already match the scale Form.Scale applies later.
     public static void InitializeScale(float scale) {
         Scale = scale;
         Font = new Font("Tahoma", 11 * scale, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -36,8 +35,6 @@ static class Skin {
             flags | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
     }
 
-    // Two runs so each half has its own color; the second starts where the first one ends, so the word keeps
-    // the spacing of a single run at every scale. The word is centered across the block and starts at its top.
     public static void DrawLogo(Graphics g, Rectangle block, Color first, Color second) {
         const TextFormatFlags flags = TextFormatFlags.NoPadding;
         int whole = TextRenderer.MeasureText(g, "autocat", Logo, Size.Empty, flags).Width;
@@ -342,7 +339,6 @@ class MicroButton : Control {
     }
 }
 
-// One line of accent text in the footer. It is underlined while hovered or focused; Enter and Space activate it.
 sealed class NoticeLink : Label {
     bool hover, pressed;
     public Action Action;
@@ -606,7 +602,6 @@ sealed class MenuTabs : Control {
             ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
     }
 
-    // Uniform columns clip "experimental" at 5 tabs; size each to its own label, then stretch to fill Width.
     int[] ColumnWidths() {
         var widths = new int[Tabs.Length];
         int total = 0, pad = Skin.D(16);
