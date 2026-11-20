@@ -1,0 +1,8 @@
+schema=1
+channel=stable
+sequence=5
+version=1.3.0
+runtime=130
+bytes=430592
+sha256=000547FA2959DE9C95A5278195FC9892BC6DBBB3EC6E0D314A86D6D0AE7D0C2D
+payload=https://github.com/kaankutluturk/autocat/releases/download/v1.3.0/autocat.exe
